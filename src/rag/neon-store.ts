@@ -39,9 +39,9 @@ type NeonSql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<
 type NeonRow = Record<string, unknown>
 
 // Typed row shapes for each query — no `any` needed at usage sites
-interface CountRow  { count: number }
+interface CountRow { count: number }
 interface SearchRow { title: string; url: string; content: string; score: number }
-interface ListRow   { id: number; title: string; url: string }
+interface ListRow { id: number; title: string; url: string }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ export class NeonVectorStore implements IRagStore {
           title       TEXT    NOT NULL,
           url         TEXT    NOT NULL DEFAULT '',
           content     TEXT    NOT NULL,
-          embedding   vector(${this.dimension as unknown as TemplateStringsArray})
+          embedding   vector(${this.sql.unsafe(String(this.dimension))})
         )
       `
 
