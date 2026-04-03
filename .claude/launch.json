@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev (tsx watch)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "src/index.ts"]
+    },
+    {
+      "name": "build (tsc)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsc", "--watch"]
+    },
+    {
+      "name": "start (compiled)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/index.js"]
+    }
+  ]
+}
