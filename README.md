@@ -1,34 +1,39 @@
-# Using This as a Boilerplate
+# claude-agentinc-rag
 
-This repository is a boilerplate for building agentic research systems with:
+Deterministic multi-agent RAG pipeline built with the Claude Agent SDK, web research, indexed retrieval, and confidence-based synthesis.
 
-- deterministic multi-agent orchestration
-- explicit RAG runtime bootstrap
-- web evidence gathering
-- indexed retrieval-backed synthesis
-- configurable retry depth and web budgets
+This project is a small, code-controlled research system rather than a prompt-only orchestration demo. It runs a fixed pipeline:
 
-It is no longer a prompt-only orchestrator demo. The current design is a small code-controlled research pipeline that you can adapt by swapping prompts, tools, models, and the backing RAG store.
+1. `researcher` gathers evidence from the web
+2. `indexer` writes that evidence into the RAG store
+3. `synthesizer` answers from indexed knowledge only
+4. the orchestrator decides whether to stop or run another targeted pass
 
----
+It is designed to be a practical starting point for agentic research workflows where grounded answers, iterative coverage, and clean separations of responsibility matter.
 
-## Quick Start
+## Why This Repo Exists
 
-```bash
-git clone <repo>
-cd claude-agentinc-rag
-npm install
-cp .env.example .env
-# Add ANTHROPIC_API_KEY and DATABASE_URL
-npm run ask "your research question"
-```
+Most agent demos blur orchestration, retrieval, prompting, and output handling into one file. This repo takes the opposite approach:
 
----
+- deterministic orchestration instead of free-form agent loops
+- explicit RAG runtime bootstrap instead of import-time side effects
+- retrieval-backed synthesis instead of direct web-to-answer generation
+- confidence-based retry logic instead of a single pass with no coverage feedback
+- modular orchestration code that is easier to extend and reason about
+
+## What It Does
+
+- runs a `researcher -> indexer -> synthesizer` pipeline
+- gathers live web evidence with `WebSearch` and `WebFetch`
+- stores evidence in a RAG backend exposed through an in-process MCP server
+- synthesizes answers only from indexed knowledge
+- emits a machine-readable confidence block to drive retry decisions
+- supports configurable web budgets, retry depth, and per-agent model selection
 
 ## Architecture at a Glance
 
 ```text
-User Query
+Question
   |
   v
 initializeRagRuntime()
@@ -40,162 +45,178 @@ initializeRagRuntime()
 runResearchSession(question, runtime)
   |
   +--> researcher  -> WebSearch + WebFetch -> SOURCE blocks
-  +--> indexer     -> index_document/list_indexed
+  +--> indexer     -> index_document + list_indexed
   +--> synthesizer -> search_documents -> cited answer + confidence JSON
   |
   +--> low confidence    -> targeted retry
-  +--> medium/high       -> return answer
+  +--> medium/high       -> stop
 ```
 
----
+Current default behavior:
 
-## What You Keep
+- default mode stops on `medium` or `high`
+- deep research mode retries on `medium` and `low`
+- the synthesizer answers only from indexed knowledge
+- the active store is Neon pgvector with local embeddings
 
-These parts are reusable infrastructure and usually stay intact:
+## Quick Start
 
-- `src/orchestrator/index.ts`
-- `src/orchestrator/agentRunner.ts`
-- `src/orchestrator/planner.ts`
-- `src/orchestrator/presenter.ts`
-- `src/orchestrator/researchOutput.ts`
-- `src/orchestrator/limiter.ts`
-- `src/rag/server.ts`
-- `src/rag/tools/*`
+### Prerequisites
 
----
+- Node.js 20+
+- an `ANTHROPIC_API_KEY`
+- a `DATABASE_URL` for Neon Postgres with pgvector support
 
-## What You Usually Change
+### Setup
 
-### 1. `src/agents/researcher.ts`
+```bash
+git clone <repo>
+cd claude-agentinc-rag
+npm install
+cp .env.example .env
+```
 
-Change this when you want different evidence sources, structured extraction rules, or domain-specific search behavior.
+Set these environment variables in `.env`:
+
+```bash
+ANTHROPIC_API_KEY=...
+DATABASE_URL=...
+```
+
+Run a question:
+
+```bash
+npm run ask "can you tell me the top five places to visit in hobart"
+```
+
+Build the project:
+
+```bash
+npm run build
+```
+
+## How the Pieces Fit Together
+
+### Core runtime
+
+- `src/index.ts`: CLI entry point and startup flow
+- `src/rag/index.ts`: explicit runtime bootstrap returning `{ ragStore, ragServer }`
+- `src/orchestrator/index.ts`: session loop and retry flow
+
+### Orchestration modules
+
+- `src/orchestrator/agentRunner.ts`: Claude SDK execution per agent
+- `src/orchestrator/planner.ts`: query planning and stop policy
+- `src/orchestrator/presenter.ts`: terminal rendering and progress output
+- `src/orchestrator/researchOutput.ts`: SOURCE parsing and URL dedupe
+- `src/orchestrator/limiter.ts`: web tool budgets
+- `src/orchestrator/config.ts`: env-backed configuration
+
+### Agents
+
+- `src/agents/researcher.ts`: gathers evidence from the web
+- `src/agents/indexer.ts`: turns SOURCE blocks into indexed documents
+- `src/agents/synthesizer.ts`: answers using retrieved documents only
+
+## Customizing for a New Domain
+
+For most use cases, these are the main files you will change.
+
+### `src/agents/researcher.ts`
+
+Use this to change where evidence comes from and how it should be extracted.
 
 Examples:
-- jobs: job boards, company careers pages, LinkedIn alternatives
-- legal: legislation, case law, regulator sources
-- ecommerce: retailer product pages, marketplace listings, pricing pages
-- internal enterprise: replace web tools with custom MCP tools for your own systems
+- jobs: job boards, careers pages, recruiter sources
+- legal: legislation, courts, regulators
+- ecommerce: retailer pages, marketplace listings, pricing sources
+- internal systems: replace web tools with MCP tools for your own data
 
-### 2. `src/agents/synthesizer.ts`
+### `src/agents/synthesizer.ts`
 
-Change this when you want a different answer structure or different confidence standards.
+Use this to change answer structure and confidence rules.
 
 Examples:
-- property analysis: address, price, comps, confidence
 - research brief: findings, evidence, open questions
 - events: name, date, location, venue certainty
-- support assistant: diagnosis, probable cause, remediation, verification steps
+- support assistant: probable cause, remediation, verification steps
+- market scan: vendor summary, comparison, risks, gaps
 
-### 3. `src/agents/indexer.ts`
+### `src/agents/indexer.ts`
 
-Change this only if your source format changes. If you replace `SOURCE` blocks with a different structured format, update the indexer prompt accordingly.
+Change this if you change the source format. If your researcher no longer emits `SOURCE` blocks, the indexer prompt should evolve with it.
 
-### 4. `src/rag/index.ts`
+### `src/rag/index.ts`
 
-Change this when you want to switch the active store implementation.
+Change this when you want to swap the active store implementation.
 
-Current default:
-- Neon pgvector with local embeddings
+Available directions already present in the repo:
 
-Possible alternatives already in the repo:
+- Neon pgvector
 - MiniSearch BM25
 - in-memory vector store
 
-### 5. `src/orchestrator/toolConfig.ts`
+### `src/orchestrator/toolConfig.ts`
 
-Change this when you add or remove tools or MCP servers.
+Change this when your environment injects tools you do not want in agent context, or when you add new MCP-backed capabilities.
 
-### 6. `src/libs/agentFormatters.ts`
+## Configuration
 
-Change this when you add new agents or want different terminal summaries.
+Important environment variables:
 
----
-
-## Core Extension Points
-
-### Add a new agent
-
-1. Create a new `src/agents/<name>.ts` file
-2. Extend orchestration flow if the new step is part of the core pipeline
-3. Add formatting in `src/libs/agentFormatters.ts` if needed
-4. Add any required tools in `src/orchestrator/toolConfig.ts`
-
-### Replace the RAG backend
-
-Keep the `IRagStore` contract and the MCP tool surface stable.
-
-If the new store still supports:
-- `addDocument`
-- `searchDocuments`
-- `listDocuments`
-- `clearDocuments`
-
-then the rest of the application can remain unchanged.
-
-### Change retry behavior
-
-The retry policy is controlled in `src/orchestrator/planner.ts` and `src/orchestrator/index.ts`.
-
-Current default:
-- stop on `medium` or `high`
-- retry only on `low`
-
-Optional deeper mode:
-- set `DEEP_RESEARCH=true`
-
----
-
-## Cost and Quality Controls
-
-Key env settings:
-
-| Setting | Purpose |
+| Variable | Purpose |
 |---|---|
-| `DEEP_RESEARCH` | Retry on medium confidence as well as low |
+| `DEEP_RESEARCH` | Retry on `medium` confidence as well as `low` |
 | `MAX_RESEARCH_ITERATIONS` | Hard cap on loop count |
-| `INITIAL_WEB_FETCHES` | Broader first-pass fetch budget |
-| `GAP_WEB_FETCHES` | Focused later-pass fetch budget |
+| `CLEAR_RAG_ON_START` | Reset indexed state at the beginning of a session |
+| `INITIAL_WEB_FETCHES` | First-pass fetch budget |
+| `GAP_WEB_FETCHES` | Later-pass fetch budget |
 | `INITIAL_WEB_SEARCHES` | First-pass search budget |
 | `GAP_WEB_SEARCHES` | Later-pass search budget |
 | `RESEARCHER_MODEL` | Research agent model override |
 | `INDEXER_MODEL` | Indexer model override |
 | `SYNTHESIZER_MODEL` | Synthesizer model override |
+| `ANTHROPIC_API_KEY` | Claude API access |
+| `DATABASE_URL` | Neon/Postgres connection string |
 
 Practical guidance:
 
-- Keep default mode for generic, cheaper boilerplate behavior.
-- Turn on `DEEP_RESEARCH` for higher recall and more retries.
-- Increase first-pass budgets for messy domains with weak sources.
-- Keep later-pass budgets smaller so retries stay focused.
-
----
+- keep default mode for lower-cost runs
+- enable `DEEP_RESEARCH=true` when recall matters more than cost
+- increase first-pass budgets for noisy domains
+- keep gap-fill budgets smaller so retries stay focused
 
 ## Good Fit Use Cases
 
-This boilerplate fits domains where:
+This repo is a strong fit when:
 
-- evidence must be gathered before answering
-- sources change over time
-- confidence and coverage matter
+- answers should be grounded in gathered evidence
+- coverage gaps should be made explicit
+- information changes over time
 - retrieval should sit between research and synthesis
+- you want a reusable agentic research boilerplate, not a one-off prompt demo
 
 Examples:
+
 - event discovery and aggregation
 - travel research assistants
 - market and competitor scans
-- policy and regulation tracking
-- procurement/vendor comparison tools
+- policy and regulation monitoring
+- procurement and vendor comparison workflows
 - internal knowledge enrichment pipelines
 
----
+## When This Is Not the Right Tool
 
-## Less Suitable Use Cases
-
-This is a weaker fit when:
+This is probably overkill when:
 
 - you only need a single direct answer with no retrieval layer
-- all data already exists in a trusted internal database
+- all trustworthy data already lives in an internal system
 - deterministic business rules matter more than research breadth
-- you need transactional workflows instead of evidence gathering
+- your workflow is transactional rather than investigative
 
-In those cases, a simpler tool-calling agent or a non-agent workflow may be a better starting point.
+In those cases, a simpler tool-calling agent or a non-agent pipeline may be a better fit.
+
+## Related Docs
+
+- `ARCHITECTURE.md` for the detailed system design
+- `BOILERPLATE.md` for extension and reuse guidance
