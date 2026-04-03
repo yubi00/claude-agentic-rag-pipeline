@@ -31,4 +31,5 @@ const embedFn = await createLocalEmbedder()
 const store = new NeonVectorStore(connectionString, embedFn)
 await store.initialize()
 
+export const ragStore = store
 export const ragServer = createRagServer(store)

@@ -35,7 +35,10 @@ import { logger } from '../libs/logger.js'
 // ── Local types for neon since the package may not be installed ───────────────
 
 /** Minimal type for the tagged-template SQL client returned by neon(). */
-type NeonSql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<NeonRow[]>
+type NeonSql = ((strings: TemplateStringsArray, ...values: unknown[]) => Promise<NeonRow[]>) & {
+  // `neon()` exposes an `unsafe` helper for injecting raw SQL fragments.
+  unsafe: (raw: string) => unknown
+}
 type NeonRow = Record<string, unknown>
 
 // Typed row shapes for each query — no `any` needed at usage sites

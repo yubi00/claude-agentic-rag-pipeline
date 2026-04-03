@@ -13,12 +13,15 @@ export class OrchestratorLogger {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   processMessage(msg: any): void {
-    if (msg?.type !== 'assistant' || msg.parent_tool_use_id) return
+    if (msg?.type !== 'assistant') return
 
+    // We want to parse confidence blocks from both orchestrator-level and
+    // subagent assistant messages (synthesizer may emit its JSON block from
+    // a subagent). Iterate all content blocks and look for tool_use and text.
     const blocks = msg.message?.content ?? []
     for (const block of blocks) {
       if (block.type === 'tool_use') this.trackIteration(block)
-      if (block.type === 'text')     this.logConfidence(block.text ?? '')
+      if (block.type === 'text') this.logConfidence(block.text ?? '')
     }
   }
 

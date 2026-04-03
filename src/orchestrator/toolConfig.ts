@@ -53,4 +53,14 @@ export const DISALLOWED_TOOLS = [
 ]
 
 /** Tools the orchestrator itself is permitted to call (subagents only). */
-export const ALLOWED_TOOLS = ['Agent']
+// Include web tools and the RAG MCP helpers so subagents can perform searches
+// and index results. Keep this list minimal for safety.
+export const ALLOWED_TOOLS = [
+  'Agent',
+  'WebSearch',
+  'WebFetch',
+  'mcp__rag__index_document',
+  'mcp__rag__search_documents',
+  'mcp__rag__list_indexed',
+  'mcp__rag__clear_index',
+]

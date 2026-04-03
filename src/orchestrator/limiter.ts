@@ -8,10 +8,11 @@
 
 import { RE, R } from '../libs/ansi.js'
 
-export const MAX_WEB_FETCHES = 4   // per session
-export const MAX_WEB_SEARCHES = 4  // per session
+// Conservative defaults: keep first-pass coverage reasonable while avoiding runaway fetches.
+export const DEFAULT_MAX_WEB_FETCHES = Number(process.env.MAX_WEB_FETCHES ?? 5)
+export const DEFAULT_MAX_WEB_SEARCHES = Number(process.env.MAX_WEB_SEARCHES ?? 5)
 
-const STOP_MSG = 'Research budget exhausted. OUTPUT YOUR RESEARCH SUMMARY NOW. Do not call any more tools.'
+const STOP_MSG = 'Research budget exhausted. Stop calling web tools immediately. Output your research summary now, using only the sources already gathered, and explicitly mention any remaining gaps.'
 
 const deny = (reason: string) => ({
   decision: 'block' as const,
@@ -28,7 +29,9 @@ const allow = () => ({
   hookSpecificOutput: { hookEventName: 'PreToolUse' as const },
 })
 
-export function makeToolLimiterHooks() {
+export function makeToolLimiterHooks(options?: { maxWebFetches?: number; maxWebSearches?: number }) {
+  const maxWebFetches = options?.maxWebFetches ?? DEFAULT_MAX_WEB_FETCHES
+  const maxWebSearches = options?.maxWebSearches ?? DEFAULT_MAX_WEB_SEARCHES
   const counts: Record<string, number> = {}
   let hardStop = false
 
@@ -41,15 +44,15 @@ export function makeToolLimiterHooks() {
 
     counts[tool] = (counts[tool] ?? 0) + 1
 
-    if (tool === 'WebFetch' && counts[tool] > MAX_WEB_FETCHES) {
+    if (tool === 'WebFetch' && counts[tool] > maxWebFetches) {
       hardStop = true
-      console.log(`  ${RE}[LIMIT] WebFetch cap (${MAX_WEB_FETCHES}) reached — hard stop${R}`)
+      console.log(`  ${RE}[LIMIT] WebFetch cap (${maxWebFetches}) reached — hard stop${R}`)
       return deny(STOP_MSG)
     }
 
-    if (tool === 'WebSearch' && counts[tool] > MAX_WEB_SEARCHES) {
+    if (tool === 'WebSearch' && counts[tool] > maxWebSearches) {
       hardStop = true
-      console.log(`  ${RE}[LIMIT] WebSearch cap (${MAX_WEB_SEARCHES}) reached — hard stop${R}`)
+      console.log(`  ${RE}[LIMIT] WebSearch cap (${maxWebSearches}) reached — hard stop${R}`)
       return deny(STOP_MSG)
     }
 

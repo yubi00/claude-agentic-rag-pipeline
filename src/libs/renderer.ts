@@ -51,11 +51,11 @@ class Renderer {
   // ── Handler dispatch map ─────────────────────────────────────────────────
 
   private readonly handlers: Record<string, (msg: Msg) => void> = {
-    system:           (msg) => this.handleSystem(msg),
-    assistant:        (msg) => this.handleAssistant(msg),
-    tool_progress:    (msg) => this.handleToolProgress(msg),
-    tool_result:      (msg) => this.handleToolResult(msg),
-    result:           (msg) => this.handleResult(msg),
+    system: (msg) => this.handleSystem(msg),
+    assistant: (msg) => this.handleAssistant(msg),
+    tool_progress: (msg) => this.handleToolProgress(msg),
+    tool_result: (msg) => this.handleToolResult(msg),
+    result: (msg) => this.handleResult(msg),
     rate_limit_event: (msg) => this.handleRateLimit(msg),
   }
 
@@ -67,10 +67,10 @@ class Renderer {
 
   private handleSystem(msg: Msg): void {
     const subtypeHandlers: Record<string, (msg: Msg) => void> = {
-      init:              (m) => this.handleInit(m),
-      task_started:      (m) => this.handleTaskStarted(m),
-      task_progress:     (m) => this.handleTaskProgress(m),
-      task_notification: ()  => console.log(`  ${D}[agent done]${R}`),
+      init: (m) => this.handleInit(m),
+      task_started: (m) => this.handleTaskStarted(m),
+      task_progress: (m) => this.handleTaskProgress(m),
+      task_notification: () => console.log(`  ${D}[agent done]${R}`),
     }
     subtypeHandlers[msg.subtype ?? '']?.(msg)
   }
@@ -108,15 +108,19 @@ class Renderer {
 
     for (const block of blocks) {
       const bt: string = block.type ?? ''
-      if (bt === 'thinking')  this.handleThinkingBlock(block, isSubagent)
-      if (bt === 'text')      this.handleTextBlock(block, isSubagent, agentName)
-      if (bt === 'tool_use')  this.handleToolUseBlock(block, isSubagent, agentName)
+      if (bt === 'thinking') this.handleThinkingBlock(block, isSubagent)
+      if (bt === 'text') this.handleTextBlock(block, isSubagent, agentName)
+      if (bt === 'tool_use') this.handleToolUseBlock(block, isSubagent, agentName)
     }
   }
 
   private handleThinkingBlock(block: Msg, isSubagent: boolean): void {
-    if (isSubagent) return  // suppress subagent thinking — too verbose
     const preview = ((block.thinking as string) ?? '').replace(/\n/g, ' ').slice(0, 200)
+    if (isSubagent) {
+      // show subagent thinking in a more compact form
+      console.log(`  ${D}[subagent thinking] ${preview.slice(0, 120)}…${R}`)
+      return
+    }
     console.log(`  ${D}[thinking] ${preview}…${R}`)
   }
 
@@ -201,6 +205,14 @@ class Renderer {
   private handleToolResult(msg: Msg): void {
     const toolName: string = msg.tool_name ?? ''
     const resultText = extractText(msg.content ?? [])
+
+    // Clearer logging for failed or blocked tool calls
+    const status = msg.status ?? msg.tool_status ?? ''
+    const errorMsg = msg.error ?? msg.error_message ?? (msg.content && msg.content[0]?.text) ?? ''
+    if (status && status !== 'ok' && status !== 'succeeded' && status !== 'success') {
+      console.log(`  ${RE}[tool:${toolName} FAILED]${R} ${D}${String(errorMsg).slice(0, 200)}${R}`)
+      return
+    }
 
     if (toolName.startsWith('mcp__rag__')) {
       if (resultText) renderRagResult(toolName, resultText)
