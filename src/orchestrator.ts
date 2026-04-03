@@ -15,6 +15,7 @@ import { ORCHESTRATOR_SYSTEM_PROMPT } from './prompt.js'
 import { makeToolLimiterHooks } from './limiter.js'
 import { OrchestratorLogger } from './logger.js'
 import { renderMessage } from './renderer.js'
+import { SESSION_TOOLS, DISALLOWED_TOOLS, ALLOWED_TOOLS } from './toolConfig.js'
 
 export async function runResearchSession(question: string): Promise<void> {
   const logger = new OrchestratorLogger()
@@ -24,7 +25,9 @@ export async function runResearchSession(question: string): Promise<void> {
     options: {
       model: process.env.ORCHESTRATOR_MODEL ?? 'claude-haiku-4-5-20251001',
       systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
-      allowedTools: ['Agent'],
+      tools: SESSION_TOOLS,
+      disallowedTools: DISALLOWED_TOOLS,
+      allowedTools: ALLOWED_TOOLS,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       hooks: makeToolLimiterHooks(),
