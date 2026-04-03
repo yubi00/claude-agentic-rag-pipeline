@@ -5,8 +5,8 @@
  * whenever the orchestrator parses it from the stream.
  */
 
-import { R, B, D, GR, YE, RE } from './ansi.js'
-import { parseConfidenceBlock } from './utils.js'
+import { R, B, D, GR, YE, RE } from '../libs/ansi.js'
+import { parseConfidenceBlock } from '../utils/index.js'
 
 export class OrchestratorLogger {
   private iteration = 0

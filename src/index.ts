@@ -8,7 +8,7 @@
  * Requires: ANTHROPIC_API_KEY environment variable
  */
 
-import { runResearchSession } from './orchestrator.js'
+import { runResearchSession } from './orchestrator/index.js'
 
 async function main(): Promise<void> {
   const question = process.argv.slice(2).join(' ').trim()

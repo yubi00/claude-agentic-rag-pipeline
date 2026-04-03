@@ -10,7 +10,7 @@
 type Msg = any
 
 import { R, B, D, CY, GR, YE, MA, RE, BL, AGENT_COLORS } from './ansi.js'
-import { printLines, extractText } from './utils.js'
+import { printLines, extractText } from '../utils/index.js'
 import { AGENT_FORMATTERS } from './agentFormatters.js'
 
 // ── RAG result rendering ──────────────────────────────────────────────────────

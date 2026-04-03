@@ -44,7 +44,7 @@ SOURCE: <url>
 TITLE: <page title>
 RELEVANCE: <1-2 sentences why this source is relevant>
 CONTENT:
-<extracted key content — remove navigation, ads, boilerplate — up to ~400 words>
+<extracted key content — remove navigation, ads, boilerplate — up to ~2000 words>
 ---
 
 After all sources:

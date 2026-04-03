@@ -6,7 +6,7 @@
  * while RAG MCP calls (index_document, search_documents etc.) remain allowed.
  */
 
-import { RE, R } from './ansi.js'
+import { RE, R } from '../libs/ansi.js'
 
 export const MAX_WEB_FETCHES = 4   // per session
 export const MAX_WEB_SEARCHES = 4  // per session

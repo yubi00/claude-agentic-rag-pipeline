@@ -2,7 +2,7 @@
  * Shared utilities used across renderer, logger, and agents.
  */
 
-import { R } from './ansi.js'
+import { R } from '../libs/ansi.js'
 
 // ── Terminal output ───────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@
  */
 
 import { R, GR, YE, RE, B, D, AGENT_COLORS } from './ansi.js'
-import { printLines, parseConfidenceBlock } from './utils.js'
+import { printLines, parseConfidenceBlock } from '../utils/index.js'
 
 // ── Individual formatters ─────────────────────────────────────────────────────
 
