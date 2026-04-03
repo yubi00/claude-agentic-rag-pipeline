@@ -25,9 +25,12 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  console.log(`\nResearching: "${question}"\n`)
+  const deepResearch = process.env.DEEP_RESEARCH === 'true'
 
-  await runResearchSession(question)
+  console.log(`\nResearching: "${question}"\n`)
+  console.log(`Mode: deepResearch=${deepResearch}\n`)
+
+  await runResearchSession(question, { deepResearch })
 }
 
 main().catch(err => {

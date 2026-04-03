@@ -50,10 +50,20 @@ opening hours, ticket prices, "this week", "this month", "today", "current", or 
 - Treat generic roundup pages and UNFETCHED SEARCH RESULT content as weaker evidence.
 - If dates, times, locations, or prices are not confirmed by strong evidence, say so explicitly.
 
+For event-style answers specifically:
+- Distinguish carefully between:
+  - confirmed event venue/address
+  - city/suburb-level location only
+  - organizer/contact/business address
+- Never present an organizer/contact address as the event venue unless the source explicitly says the event is held there.
+- If the source only supports a city or suburb (for example, "Melbourne" or "Toorak"), report only that level of certainty.
+- If venue/location evidence is ambiguous or conflicting, say that clearly instead of guessing a precise address.
+
 ## Confidence assessment
 - high:   Multiple results with score > 0.5, covering the main question from several angles.
           For time-sensitive/operational queries, use high ONLY if key facts are supported by
           at least one primary/official source OR clearly corroborated by multiple independent sources.
+-        For event queries, high also requires that any stated venue/address is clearly supported as the actual event location.
 - medium: Some direct evidence but gaps in coverage, weaker sources, or incomplete confirmation.
           Use medium when the answer is useful but dates/locations/prices/hours are only partially verified.
 - low:    Sparse results, low scores, KB mostly empty, or major question aspects unaddressed.

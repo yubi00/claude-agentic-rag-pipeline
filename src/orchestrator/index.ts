@@ -47,6 +47,10 @@ interface ResearchBudget {
     maxSearchesTotal: number
 }
 
+export interface ResearchSessionOptions {
+    deepResearch?: boolean
+}
+
 const MAX_ITERATIONS = Number(process.env.MAX_RESEARCH_ITERATIONS ?? 3)
 const CLEAR_RAG_ON_START = process.env.CLEAR_RAG_ON_START !== 'false'
 const DEFAULT_MODEL = process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001'
@@ -54,6 +58,7 @@ const INITIAL_FETCH_BUDGET = Number(process.env.INITIAL_WEB_FETCHES ?? 5)
 const GAP_FETCH_BUDGET = Number(process.env.GAP_WEB_FETCHES ?? 3)
 const INITIAL_SEARCH_BUDGET = Number(process.env.INITIAL_WEB_SEARCHES ?? 5)
 const GAP_SEARCH_BUDGET = Number(process.env.GAP_WEB_SEARCHES ?? 3)
+const DEFAULT_DEEP_RESEARCH = process.env.DEEP_RESEARCH === 'true'
 
 const AGENT_MODELS: Record<AgentName, string> = {
     researcher: process.env.RESEARCHER_MODEL ?? DEFAULT_MODEL,
@@ -67,8 +72,10 @@ const AGENT_TOOLSETS: Record<AgentName, string[]> = {
     synthesizer: ['mcp__rag__search_documents'],
 }
 
-export async function runResearchSession(question: string): Promise<void> {
-    logger.info({ event: 'session.start', question })
+export async function runResearchSession(question: string, options: ResearchSessionOptions = {}): Promise<void> {
+    const deepResearch = options.deepResearch ?? DEFAULT_DEEP_RESEARCH
+
+    logger.info({ event: 'session.start', question, deepResearch })
 
     if (CLEAR_RAG_ON_START) {
         await ragStore.clearDocuments()
@@ -132,7 +139,7 @@ export async function runResearchSession(question: string): Promise<void> {
                 coverageNotes: 'Synthesizer response did not include a confidence block.',
             }
 
-        const stopping = shouldStop(iteration, finalConfidence)
+        const stopping = shouldStop(iteration, finalConfidence, deepResearch)
         logConfidenceDecision(iteration, finalConfidence, stopping)
 
         if (stopping) break
@@ -487,9 +494,14 @@ function stripConfidenceBlock(text: string): string {
     return jsonIdx > 0 ? text.slice(0, jsonIdx).trim() : text.trim()
 }
 
-function shouldStop(iteration: number, confidence: ConfidenceBlock): boolean {
+function shouldStop(iteration: number, confidence: ConfidenceBlock, deepResearch: boolean): boolean {
     if (iteration >= MAX_ITERATIONS) return true
-    return confidence.confidence === 'high'
+
+    if (deepResearch) {
+        return confidence.confidence === 'high'
+    }
+
+    return confidence.confidence !== 'low'
 }
 
 function logConfidenceDecision(iteration: number, confidence: ConfidenceBlock, stopping: boolean): void {
@@ -503,9 +515,9 @@ function logConfidenceDecision(iteration: number, confidence: ConfidenceBlock, s
     console.log(`\n${B}${color}[ORCHESTRATOR:decision] iter=${iteration} confidence=${confidence.confidence.toUpperCase()}${R}`)
     if (stopping && confidence.confidence !== 'high' && iteration >= MAX_ITERATIONS) {
         console.log(`  ${D}→ stopping: max iterations reached${R}`)
-    } else if (confidence.confidence !== 'high' && confidence.missingTopics.length > 0) {
+    } else if (confidence.confidence === 'low' && confidence.missingTopics.length > 0) {
         console.log(`  ${D}→ will gap-fill: ${confidence.missingTopics.join(', ')}${R}`)
-    } else if (confidence.confidence !== 'high') {
+    } else if (confidence.confidence === 'low') {
         console.log(`  ${D}→ will broaden search for another pass${R}`)
     } else {
         console.log(`  ${D}→ stopping${R}`)
