@@ -98,6 +98,23 @@ export async function runResearchSession(question: string): Promise<void> {
             console.log(`  ${D}[researcher:dedupe] removed ${dedupedResearch.removedCount} previously covered source(s)${R}`)
         }
 
+        const sourceCount = extractSourceUrls(dedupedResearch.text).length
+        if (sourceCount === 0) {
+            const previousMissingTopics: string[] = finalConfidence ? finalConfidence.missingTopics : []
+            finalConfidence = {
+                confidence: 'low',
+                missingTopics: previousMissingTopics,
+                coverageNotes: 'Researcher returned no new indexable SOURCE blocks for this iteration.',
+            }
+
+            const stopping = iteration >= MAX_ITERATIONS
+            console.log(`  ${YE}[orchestrator:skip]${R} ${D}no new source blocks to index; retrying without synthesizer${R}`)
+            logConfidenceDecision(iteration, finalConfidence, stopping)
+
+            if (stopping) break
+            continue
+        }
+
         const indexer = await runAgent('indexer', dedupedResearch.text)
         totals.turns += indexer.turns
         totals.costUsd += indexer.costUsd

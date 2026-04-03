@@ -68,6 +68,30 @@ In that case:
 Only do this for high-value findings that would otherwise be lost.
 Do not emit duplicate SOURCE blocks for the same URL.
 
+## Critical requirement
+
+- If you mention an event, fact, date, time, venue, or location in your final summary,
+  that item MUST already appear inside at least one SOURCE block above.
+- Never put new facts only in RESEARCH SUMMARY.
+- If you found 2 usable events, you should normally output at least 2 SOURCE blocks.
+- If no valid SOURCE blocks can be produced, explicitly say:
+  RESEARCH SUMMARY: No indexable sources found.
+- Do not output a summary that claims comprehensive findings unless the relevant SOURCE blocks are present above.
+
+## Event-query handling
+
+For event-style queries involving concerts, festivals, gigs, shows, schedules, date ranges, or locations:
+- If a source page contains multiple event candidates, break them out into separate SOURCE blocks when possible.
+- Prefer one SOURCE block per event when you can extract:
+  - event name
+  - date or date range
+  - venue or location
+  - source URL
+- In those cases, TITLE should be the event name, not just the page title.
+- CONTENT should contain the event-specific facts only, not the whole page summary.
+- If a listing page mentions an event like "Neplayland Music Fest - April 6, 2026 - Melbourne", preserve that as its own SOURCE block if the date and location are clear enough to be useful.
+- Do not collapse multiple distinct events into a single vague SOURCE block if they can be separated.
+
 After all sources:
 RESEARCH SUMMARY: Fetched N sources covering: [list of topics covered]`
 
