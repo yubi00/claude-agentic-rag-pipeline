@@ -1,6 +1,14 @@
 # Using This as a Boilerplate
 
-This project is a production-ready boilerplate for building **agentic RAG pipelines** using the Claude Agent SDK. It implements a ReAct (Reason-Act-Observe) multi-agent loop with web research, BM25 indexing, and iterative gap-filling.
+This repository is a boilerplate for building agentic research systems with:
+
+- deterministic multi-agent orchestration
+- explicit RAG runtime bootstrap
+- web evidence gathering
+- indexed retrieval-backed synthesis
+- configurable retry depth and web budgets
+
+It is no longer a prompt-only orchestrator demo. The current design is a small code-controlled research pipeline that you can adapt by swapping prompts, tools, models, and the backing RAG store.
 
 ---
 
@@ -11,7 +19,7 @@ git clone <repo>
 cd claude-agentinc-rag
 npm install
 cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
+# Add ANTHROPIC_API_KEY and DATABASE_URL
 npm run ask "your research question"
 ```
 
@@ -19,149 +27,175 @@ npm run ask "your research question"
 
 ## Architecture at a Glance
 
-```
+```text
 User Query
-    │
-    ▼
-Orchestrator (ReAct loop, max 3 iterations)
-    │
-    ├── researcher  → WebSearch + WebFetch → SOURCE blocks
-    ├── indexer     → index_document (BM25 via MiniSearch)
-    └── synthesizer → search_documents → cited answer + confidence JSON
-                           │
-                    confidence == "low" → loop again with gap queries
-                    confidence == "high/medium" → return answer
+  |
+  v
+initializeRagRuntime()
+  |
+  +--> ragStore
+  +--> ragServer
+  |
+  v
+runResearchSession(question, runtime)
+  |
+  +--> researcher  -> WebSearch + WebFetch -> SOURCE blocks
+  +--> indexer     -> index_document/list_indexed
+  +--> synthesizer -> search_documents -> cited answer + confidence JSON
+  |
+  +--> low confidence    -> targeted retry
+  +--> medium/high       -> return answer
 ```
 
 ---
 
-## What to Change for a New Domain
+## What You Keep
 
-Only 5 files need to change. Everything else is infrastructure you keep as-is.
+These parts are reusable infrastructure and usually stay intact:
 
-### 1. `src/agents/researcher.ts` — Search strategy
-
-Define where the researcher looks and how it formats results.
-
-```ts
-// Change the search strategy section:
-// - GOOD sources: list domain-specific authoritative sites
-// - AVOID: sites that block scraping or require login
-// - Adjust output format if your domain needs structured fields
-
-export const researcherDef: AgentDefinition = {
-  prompt: RESEARCHER_PROMPT,
-  tools: ['WebSearch', 'WebFetch'],
-  model: 'haiku',
-}
-```
-
-**Examples by domain:**
-- Real estate: `agfg → domain.com.au, realestate.com.au, rpdata.com`
-- Legal: `caselaw.findlaw.com, legislation.gov.au`
-- Medical: `pubmed.ncbi.nlm.nih.gov, uptodate.com`
-- Recruiting: your internal resume DB (replace WebFetch with a custom MCP tool)
+- `src/orchestrator/index.ts`
+- `src/orchestrator/agentRunner.ts`
+- `src/orchestrator/planner.ts`
+- `src/orchestrator/presenter.ts`
+- `src/orchestrator/researchOutput.ts`
+- `src/orchestrator/limiter.ts`
+- `src/rag/server.ts`
+- `src/rag/tools/*`
 
 ---
 
-### 2. `src/agents/synthesizer.ts` — Answer format
+## What You Usually Change
 
-Define how the final answer is structured and what confidence means for your domain.
+### 1. `src/agents/researcher.ts`
 
-```ts
-// Change the "Composing the answer" section to match your output format:
-// - Property report? Use structured fields: address, price, comps, rating
-// - Legal brief? Use IRAC format: Issue, Rule, Analysis, Conclusion
-// - Restaurant guide? Use a ranked list with ratings, address, cuisine
+Change this when you want different evidence sources, structured extraction rules, or domain-specific search behavior.
 
-// Adjust confidence thresholds to match your domain's stakes:
-// high:   safe to present to user without disclaimer
-// medium: present with a "verify before acting" note
-// low:    insufficient data, trigger another research iteration
-```
+Examples:
+- jobs: job boards, company careers pages, LinkedIn alternatives
+- legal: legislation, case law, regulator sources
+- ecommerce: retailer product pages, marketplace listings, pricing pages
+- internal enterprise: replace web tools with custom MCP tools for your own systems
 
----
+### 2. `src/agents/synthesizer.ts`
 
-### 3. `src/prompt.ts` — Orchestrator instructions
+Change this when you want a different answer structure or different confidence standards.
 
-The ReAct loop structure stays the same. Update the agent descriptions and final output format.
+Examples:
+- property analysis: address, price, comps, confidence
+- research brief: findings, evidence, open questions
+- events: name, date, location, venue certainty
+- support assistant: diagnosis, probable cause, remediation, verification steps
 
-```ts
-// Update the agent descriptions to match your domain context:
-// - researcher: "Searches MLS listings and property databases..."
-// - synthesizer: "Produces a structured property comp report..."
+### 3. `src/agents/indexer.ts`
 
-// Update the Final output section to describe your expected answer format
-```
+Change this only if your source format changes. If you replace `SOURCE` blocks with a different structured format, update the indexer prompt accordingly.
 
----
+### 4. `src/rag/index.ts`
 
-### 4. `src/toolConfig.ts` — Tool access
+Change this when you want to switch the active store implementation.
 
-Add or remove tools from `SESSION_TOOLS`. If you add custom MCP servers (e.g. a CRM connector, database tool), register them here.
+Current default:
+- Neon pgvector with local embeddings
 
-```ts
-export const SESSION_TOOLS = [
-  'Agent',
-  'WebSearch',
-  'WebFetch',
-  'mcp__rag__index_document',
-  'mcp__rag__search_documents',
-  'mcp__rag__list_indexed',
-  'mcp__rag__clear_index',
-  'mcp__your_custom_tool__query',  // ← add your tools here
-]
-```
+Possible alternatives already in the repo:
+- MiniSearch BM25
+- in-memory vector store
 
-Update `DISALLOWED_TOOLS` to match your Claude Code environment's MCP servers.
+### 5. `src/orchestrator/toolConfig.ts`
+
+Change this when you add or remove tools or MCP servers.
+
+### 6. `src/libs/agentFormatters.ts`
+
+Change this when you add new agents or want different terminal summaries.
 
 ---
 
-### 5. `src/agentFormatters.ts` — Terminal output
+## Core Extension Points
 
-Add a formatter for any new agent you register. Existing formatters for researcher/indexer/synthesizer can be customised to extract domain-specific fields from agent output.
+### Add a new agent
 
-```ts
-export const AGENT_FORMATTERS: Record<string, (text: string) => void> = {
-  researcher:  formatResearcher,
-  indexer:     formatIndexer,
-  synthesizer: formatSynthesizer,
-  // add: myNewAgent: formatMyNewAgent,
-}
-```
+1. Create a new `src/agents/<name>.ts` file
+2. Extend orchestration flow if the new step is part of the core pipeline
+3. Add formatting in `src/libs/agentFormatters.ts` if needed
+4. Add any required tools in `src/orchestrator/toolConfig.ts`
 
----
+### Replace the RAG backend
 
-## Tuning Cost vs Quality
+Keep the `IRagStore` contract and the MCP tool surface stable.
 
-| Setting | File | Default | Notes |
-|---|---|---|---|
-| Orchestrator model | `.env` | haiku | Set `ORCHESTRATOR_MODEL=claude-sonnet-4-6` for complex queries |
-| WebFetch cap | `src/limiter.ts` | 4 | Lower to 2 for cheaper runs, raise to 8 for thoroughness |
-| WebSearch cap | `src/limiter.ts` | 4 | Same trade-off |
-| Max iterations | `src/orchestrator.ts` | 15 turns | Lower `maxTurns` to cap worst-case cost |
-| Excerpt length | `src/rag-server.ts` | 400 chars | Raise for richer context, lower for cheaper synthesis |
+If the new store still supports:
+- `addDocument`
+- `searchDocuments`
+- `listDocuments`
+- `clearDocuments`
 
----
+then the rest of the application can remain unchanged.
 
-## Swapping the RAG Store
+### Change retry behavior
 
-The current store is **in-memory MiniSearch (BM25)**. It resets between runs — fine for demos, not for production.
+The retry policy is controlled in `src/orchestrator/planner.ts` and `src/orchestrator/index.ts`.
 
-To use a persistent store:
+Current default:
+- stop on `medium` or `high`
+- retry only on `low`
 
-1. Replace `src/rag-server.ts` with a new MCP server that wraps your store
-2. Keep the same 4 tool names: `index_document`, `search_documents`, `list_indexed`, `clear_index`
-3. Keep the same input/output contracts — no other files need to change
-
-Good options: **pgvector** (Postgres), **Pinecone**, **Weaviate**, **SQLite + sqlite-vec**.
+Optional deeper mode:
+- set `DEEP_RESEARCH=true`
 
 ---
 
-## Adding a New Agent
+## Cost and Quality Controls
 
-1. Create `src/agents/myAgent.ts` with an `AgentDefinition`
-2. Import and register it in `src/orchestrator.ts` under `agents:`
-3. Add a formatter in `src/agentFormatters.ts`
-4. Update `src/prompt.ts` to describe the new agent to the orchestrator
-5. Add any new tools it needs to `src/toolConfig.ts`
+Key env settings:
+
+| Setting | Purpose |
+|---|---|
+| `DEEP_RESEARCH` | Retry on medium confidence as well as low |
+| `MAX_RESEARCH_ITERATIONS` | Hard cap on loop count |
+| `INITIAL_WEB_FETCHES` | Broader first-pass fetch budget |
+| `GAP_WEB_FETCHES` | Focused later-pass fetch budget |
+| `INITIAL_WEB_SEARCHES` | First-pass search budget |
+| `GAP_WEB_SEARCHES` | Later-pass search budget |
+| `RESEARCHER_MODEL` | Research agent model override |
+| `INDEXER_MODEL` | Indexer model override |
+| `SYNTHESIZER_MODEL` | Synthesizer model override |
+
+Practical guidance:
+
+- Keep default mode for generic, cheaper boilerplate behavior.
+- Turn on `DEEP_RESEARCH` for higher recall and more retries.
+- Increase first-pass budgets for messy domains with weak sources.
+- Keep later-pass budgets smaller so retries stay focused.
+
+---
+
+## Good Fit Use Cases
+
+This boilerplate fits domains where:
+
+- evidence must be gathered before answering
+- sources change over time
+- confidence and coverage matter
+- retrieval should sit between research and synthesis
+
+Examples:
+- event discovery and aggregation
+- travel research assistants
+- market and competitor scans
+- policy and regulation tracking
+- procurement/vendor comparison tools
+- internal knowledge enrichment pipelines
+
+---
+
+## Less Suitable Use Cases
+
+This is a weaker fit when:
+
+- you only need a single direct answer with no retrieval layer
+- all data already exists in a trusted internal database
+- deterministic business rules matter more than research breadth
+- you need transactional workflows instead of evidence gathering
+
+In those cases, a simpler tool-calling agent or a non-agent workflow may be a better starting point.

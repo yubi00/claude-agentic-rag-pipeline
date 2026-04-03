@@ -14,7 +14,22 @@ export const DEFAULT_MAX_WEB_SEARCHES = Number(process.env.MAX_WEB_SEARCHES ?? 5
 
 const STOP_MSG = 'Research budget exhausted. Stop calling web tools immediately. Output your research summary now, using only the sources already gathered, and explicitly mention any remaining gaps.'
 
-const deny = (reason: string) => ({
+interface ToolLimiterOptions {
+  maxWebFetches?: number
+  maxWebSearches?: number
+}
+
+interface HookDecision {
+  decision: 'approve' | 'block'
+  reason?: string
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse'
+    permissionDecision?: 'deny'
+    permissionDecisionReason?: string
+  }
+}
+
+const deny = (reason: string): HookDecision => ({
   decision: 'block' as const,
   reason,
   hookSpecificOutput: {
@@ -24,20 +39,19 @@ const deny = (reason: string) => ({
   },
 })
 
-const allow = () => ({
+const allow = (): HookDecision => ({
   decision: 'approve' as const,
   hookSpecificOutput: { hookEventName: 'PreToolUse' as const },
 })
 
-export function makeToolLimiterHooks(options?: { maxWebFetches?: number; maxWebSearches?: number }) {
+export function makeToolLimiterHooks(options?: ToolLimiterOptions) {
   const maxWebFetches = options?.maxWebFetches ?? DEFAULT_MAX_WEB_FETCHES
   const maxWebSearches = options?.maxWebSearches ?? DEFAULT_MAX_WEB_SEARCHES
   const counts: Record<string, number> = {}
   let hardStop = false
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const hook = async (input: any) => {
-    const tool: string = input.tool_name ?? ''
+  const hook = async (input: unknown): Promise<HookDecision> => {
+    const tool = getToolName(input)
 
     const isWebTool = tool === 'WebFetch' || tool === 'WebSearch'
     if (hardStop && isWebTool) return deny(STOP_MSG)
@@ -60,4 +74,11 @@ export function makeToolLimiterHooks(options?: { maxWebFetches?: number; maxWebS
   }
 
   return { PreToolUse: [{ hooks: [hook] }] }
+}
+
+function getToolName(input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+
+  const value = (input as Record<string, unknown>).tool_name
+  return typeof value === 'string' ? value : ''
 }

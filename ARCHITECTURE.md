@@ -1,6 +1,13 @@
 # Architecture: claude-agentinc-rag
 
-Agentic RAG + ReAct multi-agent orchestration demo using the Claude Agent SDK.
+Agentic RAG research pipeline built with the Claude Agent SDK.
+
+The current architecture is code-controlled, not prompt-controlled. The runtime executes a deterministic sequence:
+
+1. `researcher` gathers web evidence
+2. `indexer` writes evidence into the RAG store
+3. `synthesizer` answers from indexed knowledge only
+4. the orchestrator parses confidence and decides whether to stop or run another research pass
 
 ---
 
@@ -9,365 +16,319 @@ Agentic RAG + ReAct multi-agent orchestration demo using the Claude Agent SDK.
 1. [System Overview](#system-overview)
 2. [Component Map](#component-map)
 3. [Data Flow](#data-flow)
-4. [ReAct Loop](#react-loop)
+4. [Iteration Control](#iteration-control)
 5. [Agent Definitions](#agent-definitions)
-6. [RAG Server](#rag-server)
-7. [Model Strategy](#model-strategy)
+6. [RAG Runtime](#rag-runtime)
+7. [Key Configuration](#key-configuration)
 8. [Key Architectural Decisions](#key-architectural-decisions)
 
 ---
 
 ## System Overview
 
-The system answers open-ended research questions by orchestrating three specialist AI agents in a **ReAct (Reason-Act-Observe)** loop. Web content is fetched, indexed into an in-memory BM25 store, and then retrieved to compose a cited answer. The loop runs up to 3 iterations, with each iteration targeting knowledge gaps reported by the synthesizer.
+The CLI bootstraps a RAG runtime explicitly at startup, then passes that runtime into the orchestrator. The orchestrator owns only session flow and iteration policy; agent execution, planning, output rendering, and research-output processing live in smaller modules.
 
-```
-             ┌──────────────────────────────────────┐
-             │            User (CLI)                │
-             │   npm run ask "research question"    │
-             └────────────────┬─────────────────────┘
-                              │
-                              ▼
-             ┌──────────────────────────────────────┐
-             │           src/index.ts               │
-             │  - reads process.argv                │
-             │  - validates ANTHROPIC_API_KEY        │
-             │  - calls runResearchSession()         │
-             └────────────────┬─────────────────────┘
-                              │
-                              ▼
-             ┌──────────────────────────────────────┐
-             │         src/orchestrator.ts          │
-             │  claude-sonnet-4-6 + ReAct prompt    │
-             │  Only tool: Agent (spawns subagents) │
-             │  Max 30 turns, up to 3 ReAct loops   │
-             └──────────────────────────────────────┘
+```text
+User
+  |
+  v
+src/index.ts
+  - reads CLI question
+  - validates env
+  - calls initializeRagRuntime()
+  - calls runResearchSession(question, runtime)
+  |
+  v
+src/rag/index.ts
+  - creates active store
+  - initializes store
+  - creates in-process MCP server
+  - returns { ragStore, ragServer }
+  |
+  v
+src/orchestrator/index.ts
+  - runs deterministic iteration loop
+  - researcher -> indexer -> synthesizer
+  - parses confidence
+  - retries only when policy says to retry
 ```
 
 ---
 
 ## Component Map
 
-```
+```text
 claude-agentinc-rag/
 ├── src/
-│   ├── index.ts              # CLI entry point
-│   ├── orchestrator.ts       # ReAct orchestrator (sonnet-4-6)
-│   ├── rag-server.ts         # In-process MCP server (MiniSearch/BM25)
-│   ├── renderer.ts           # Terminal output formatting
-│   ├── types.ts              # Shared TypeScript types
-│   └── agents/
-│       ├── researcher.ts     # Web search + fetch agent (haiku)
-│       ├── indexer.ts        # RAG ingestion agent (haiku)
-│       └── synthesizer.ts    # Answer composition agent (haiku)
-└── package.json              # Claude Agent SDK, MiniSearch, Zod
+│   ├── index.ts                    # CLI entry point
+│   ├── agents/
+│   │   ├── researcher.ts           # Web evidence gathering prompt
+│   │   ├── indexer.ts              # RAG ingestion prompt
+│   │   └── synthesizer.ts          # Retrieval + answer prompt
+│   ├── orchestrator/
+│   │   ├── index.ts                # Session loop
+│   │   ├── agentRunner.ts          # Claude SDK agent execution
+│   │   ├── planner.ts              # Query planning and stop policy
+│   │   ├── presenter.ts            # Terminal rendering
+│   │   ├── researchOutput.ts       # SOURCE parsing and dedupe
+│   │   ├── config.ts               # env-backed config
+│   │   ├── limiter.ts              # Web tool budgets
+│   │   ├── toolConfig.ts           # tool allow/deny lists
+│   │   └── types.ts                # orchestrator shared types
+│   ├── rag/
+│   │   ├── index.ts                # explicit RAG runtime bootstrap
+│   │   ├── server.ts               # in-process MCP server factory
+│   │   ├── neon-store.ts           # active pgvector-backed store
+│   │   ├── minisearch-store.ts     # alternative in-process store
+│   │   ├── vector-store.ts         # alternative in-memory vector store
+│   │   └── tools/                  # MCP tool implementations
+│   ├── libs/
+│   │   ├── agentFormatters.ts      # agent-specific text formatting
+│   │   ├── ansi.ts                 # color helpers
+│   │   └── logger.ts               # pino logger
+│   └── utils/
+│       └── index.ts                # confidence parsing and text helpers
+└── package.json
 ```
 
 ### Dependency graph
 
-```
+```text
 index.ts
-  └── orchestrator.ts
-        ├── agents/researcher.ts   (AgentDefinition)
-        ├── agents/indexer.ts      (AgentDefinition + rag MCP)
-        ├── agents/synthesizer.ts  (AgentDefinition + rag MCP)
-        ├── rag-server.ts          (MCP server singleton)
-        └── renderer.ts
+  ├── rag/index.ts
+  |     ├── rag/neon-store.ts
+  |     └── rag/server.ts
+  |
+  └── orchestrator/index.ts
+        ├── orchestrator/agentRunner.ts
+        ├── orchestrator/planner.ts
+        ├── orchestrator/presenter.ts
+        ├── orchestrator/researchOutput.ts
+        └── agents/*.ts
 ```
 
 ---
 
 ## Data Flow
 
-```
-User Query
-    │
-    ▼
-┌────────────────────────────────────────────────────────────────┐
-│  ORCHESTRATOR  (ReAct loop, max 3 iterations)                  │
-│                                                                │
-│  ┌─── ITERATION N ──────────────────────────────────────────┐  │
-│  │                                                          │  │
-│  │  THINK: What do I need to find?                          │  │
-│  │    │                                                     │  │
-│  │    ▼                                                     │  │
-│  │  ACT 1 ── researcher ────────────────────────────────┐  │  │
-│  │           { queries, context,                        │  │  │
-│  │             isGapFilling, previouslyCovered }        │  │  │
-│  │                │                                     │  │  │
-│  │                │  WebSearch (3-5 URLs/query)         │  │  │
-│  │                │  WebFetch  (top 2-3 URLs/query)     │  │  │
-│  │                │                                     │  │  │
-│  │                ▼                                     │  │  │
-│  │           SOURCE blocks ◄────────────────────────────┘  │  │
-│  │    │                                                     │  │
-│  │    ▼                                                     │  │
-│  │  ACT 2 ── indexer ───────────────────────────────────┐  │  │
-│  │           receives SOURCE blocks                     │  │  │
-│  │                │                                     │  │  │
-│  │                │  index_document (per source)        │  │  │
-│  │                │  list_indexed   (confirm)           │  │  │
-│  │                │        │                            │  │  │
-│  │                │        ▼                            │  │  │
-│  │                │   ┌─────────────────────┐           │  │  │
-│  │                │   │  RAG MCP Server     │           │  │  │
-│  │                │   │  (MiniSearch BM25)  │           │  │  │
-│  │                │   │  in-process memory  │           │  │  │
-│  │                │   └─────────────────────┘           │  │  │
-│  │                ▼                                     │  │  │
-│  │           INDEXED: N docs ◄──────────────────────────┘  │  │
-│  │    │                                                     │  │
-│  │    ▼                                                     │  │
-│  │  ACT 3 ── synthesizer ───────────────────────────────┐  │  │
-│  │           question (iter 1)                          │  │  │
-│  │           "KNOWN GAPS: [...]\n\nQuestion: ..." (2+)  │  │  │
-│  │                │                                     │  │  │
-│  │                │  search_documents (3-5 calls,       │  │  │
-│  │                │    query rewriting if score < 0.3)  │  │  │
-│  │                │        │                            │  │  │
-│  │                │        ▼                            │  │  │
-│  │                │   ┌─────────────────────┐           │  │  │
-│  │                │   │  RAG MCP Server     │           │  │  │
-│  │                │   │  BM25 ranked results│           │  │  │
-│  │                │   └─────────────────────┘           │  │  │
-│  │                ▼                                     │  │  │
-│  │           Cited answer + JSON confidence block ◄─────┘  │  │
-│  │    │                                                     │  │
-│  │    ▼                                                     │  │
-│  │  OBSERVE: parse { confidence, missingTopics,            │  │
-│  │                   coverageNotes }                        │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
-    │
-    ▼
-Final Answer (rendered to terminal)
+```text
+Question
+  |
+  v
+initializeRagRuntime()
+  |
+  +--> ragStore  (active store implementation)
+  +--> ragServer (MCP server backed by ragStore)
+  |
+  v
+runResearchSession(question, runtime)
+  |
+  +--> optional clearDocuments()
+  |
+  +--> iteration 1..N
+         |
+         +--> build research task
+         +--> run researcher
+         |      - WebSearch
+         |      - WebFetch
+         |      - emits SOURCE blocks
+         |
+         +--> dedupe SOURCE blocks against previously covered URLs
+         |
+         +--> if no new SOURCE blocks:
+         |      - mark confidence low
+         |      - retry or stop
+         |
+         +--> run indexer
+         |      - index_document
+         |      - list_indexed
+         |
+         +--> run synthesizer
+         |      - search_documents
+         |      - cited answer
+         |      - trailing JSON confidence block
+         |
+         +--> parse confidence
+         +--> stop or gap-fill
 ```
 
 ---
 
-## ReAct Loop
+## Iteration Control
 
-The loop logic is entirely prompt-driven — no code implements the branching. The orchestrator's system prompt defines the decision table:
+Iteration control is implemented in code in `src/orchestrator/index.ts`, not delegated to a free-form orchestrator prompt.
 
-```
-After each OBSERVE:
+### Stop policy
 
-  confidence == "high"
-      └── Present answer → STOP
+Default mode:
 
-  confidence == "medium" AND iteration >= 2
-      └── Present answer + coverage note → STOP
-
-  confidence == "low" AND iteration < 3
-      └── Extract missingTopics
-          Build gap-filling queries
-          → START NEXT ITERATION
-
-  iteration == 3 (regardless of confidence)
-      └── Present best available answer + disclaimer → STOP
+```text
+high   -> stop
+medium -> stop
+low    -> retry until max iterations
 ```
 
-### Iteration shape
+Deep research mode:
 
+```text
+high         -> stop
+medium / low -> retry until max iterations
 ```
-Iteration 1 (broad)                Iteration 2+ (gap-filling)
-─────────────────────              ──────────────────────────
-queries:  2-3 broad aspects        queries:  missingTopics from prev
-context:  original question        context:  "gap filling for: [Q]"
-isGapFilling: false                isGapFilling: true
-previouslyCovered: []              previouslyCovered: [urls fetched]
-```
+
+### Research passes
+
+Iteration 1:
+- broad initial queries
+- higher fetch/search budget
+
+Iteration 2+:
+- targeted gap-filling queries derived from `missingTopics`
+- smaller fetch/search budget
+- dedupe against previously covered URLs
+
+### No-source guard
+
+If the researcher returns no new indexable `SOURCE` blocks after deduplication, the orchestrator skips indexing and synthesis for that pass and treats the iteration as low-confidence gap-filling input.
 
 ---
 
 ## Agent Definitions
 
-All three specialist agents are defined as `AgentDefinition` objects and registered on the orchestrator's `query()` call. The orchestrator calls them via the `Agent` tool — it has no other tools.
-
 ### Researcher
 
-```
-Model:  claude-haiku-4-5
-Tools:  WebSearch, WebFetch
-MCP:    none
+File: `src/agents/researcher.ts`
 
-Input:  JSON task object
-        { queries[], context, isGapFilling, previouslyCovered[] }
+- Tools: `WebSearch`, `WebFetch`
+- Responsibility: gather external evidence and emit structured `SOURCE` blocks
+- Input: JSON task object with queries, context, gap-filling flag, previously covered URLs, and fetch budget
+- Output: source blocks plus `RESEARCH SUMMARY`
 
-Output: one SOURCE block per fetched page
-        ---
-        SOURCE:    <url>
-        TITLE:     <title>
-        RELEVANCE: <1-2 sentences>
-        CONTENT:   <up to ~800 words, boilerplate stripped>
-        ---
-        RESEARCH SUMMARY: Fetched N sources covering: [topics]
-
-Gap-fill behaviour:
-  - tries 2+ search phrasings per missing topic
-  - accepts narrower sources if they directly address the gap
-  - explicitly notes topics with no web coverage
-  - skips URLs in previouslyCovered
-```
+Important behavior:
+- enforces total fetch budget per task
+- preserves high-value unfetched search results when needed
+- emits event-specific `SOURCE` blocks for event-style queries when possible
+- avoids mentioning facts in summary that are not present in a `SOURCE` block
 
 ### Indexer
 
-```
-Model:  claude-haiku-4-5
-Tools:  (none — uses MCP only)
-MCP:    rag (index_document, list_indexed)
+File: `src/agents/indexer.ts`
 
-Input:  full researcher output (SOURCE blocks)
-
-Process:
-  for each SOURCE block:
-    → index_document(content, url, title, relevance_note)
-  → list_indexed (confirm state)
-
-Output: INDEXED: N documents
-        TITLES: [list]
-        KNOWLEDGE BASE TOTAL: X documents
-```
+- Tools: MCP `rag` tools only
+- Responsibility: transform researcher output into indexed KB documents
+- Input: raw researcher output with `SOURCE` blocks
+- Output: indexing summary and KB total count
 
 ### Synthesizer
 
-```
-Model:  claude-haiku-4-5
-Tools:  (none — uses MCP only)
-MCP:    rag (search_documents)
+File: `src/agents/synthesizer.ts`
 
-Input:  question                          (iteration 1)
-        "KNOWN GAPS: [...]\n\nQ: ..."     (iteration 2+)
+- Tools: MCP `rag` search only
+- Responsibility: answer only from indexed knowledge
+- Input: original question or `KNOWN GAPS: ...` prompt
+- Output: cited answer plus required trailing confidence JSON block
 
-Iterative search protocol:
-  THINK:   identify 3-4 angles of the question
-  for each angle:
-    ACT:     search_documents(query, max_results=5)
-    OBSERVE: check relevance scores
-    if scores mostly < 0.3:
-      ACT:   search_documents(rewritten_query)  ← query rewriting
-
-Query rewriting rules:
-  all scores < 0.3       → sub-terms, synonyms
-  off-topic results      → completely different framing
-  right domain, wrong    → add qualifiers
-
-Output: cited answer using [source: Title] or [source: URL]
-        + REQUIRED trailing JSON block:
-        ```json
-        {
-          "confidence": "high" | "medium" | "low",
-          "missingTopics": [],
-          "coverageNotes": "..."
-        }
-        ```
-
-Confidence thresholds:
-  high:   multiple results score > 0.5, multi-angle coverage
-  medium: some direct evidence, gaps present, or lower scores
-  low:    sparse results, low scores, major aspects unaddressed
-```
+Important behavior:
+- performs multiple retrieval angles
+- rewrites queries if retrieval quality is weak
+- uses stricter confidence rules for time-sensitive queries
+- distinguishes confirmed event venue from city-level location and organizer/contact address
 
 ---
 
-## RAG Server
+## RAG Runtime
 
-```
-File:      src/rag-server.ts
-Transport: in-process (no subprocess, no IPC)
-Library:   MiniSearch (BM25 full-text search)
-Scope:     ephemeral — memory lives for one runResearchSession() call
+The active backend is Neon Postgres with pgvector.
 
-Exposed MCP tools:
-┌─────────────────┬──────────────────────────────────────────────────┐
-│ Tool            │ Description                                      │
-├─────────────────┼──────────────────────────────────────────────────┤
-│ index_document  │ Add doc to MiniSearch; stores in docRegistry map │
-│ search_documents│ BM25 search; title boosted 2x; fuzzy 0.2;       │
-│                 │ returns ranked { rank, score, title, url,        │
-│                 │ excerpt (400 chars) }                            │
-│ list_indexed    │ Enumerate docRegistry (no search needed)         │
-│ clear_index     │ miniSearch.removeAll() + reset docCount          │
-└─────────────────┴──────────────────────────────────────────────────┘
+### Bootstrap
 
-MiniSearch config:
-  fields:       ['title', 'content']   ← indexed for search
-  storeFields:  ['title', 'url', 'content']  ← returned in results
-  search boost: title × 2
-  fuzzy:        0.2 (allows minor typos)
+File: `src/rag/index.ts`
+
+```text
+initializeRagRuntime()
+  - validate DATABASE_URL
+  - create embedder
+  - create NeonVectorStore
+  - initialize store
+  - create in-process MCP server
+  - return { ragStore, ragServer }
 ```
 
-### RAG server access pattern
+### Active store
 
-```
-Indexer agent                    Synthesizer agent
-─────────────────                ─────────────────────────────
-index_document ──► MiniSearch    search_documents ──► MiniSearch
-list_indexed   ──► docRegistry               ▲
-                                             │
-                              iterative query rewriting loop
-```
+File: `src/rag/neon-store.ts`
 
-The RAG server is registered once on the orchestrator's `query()` call and shared across both indexer and synthesizer via the `mcpServers: ['rag']` field in each `AgentDefinition`.
+- persistent pgvector-backed semantic retrieval
+- local embeddings
+- chunk-based document indexing
+- `clearDocuments`, `addDocument`, `searchDocuments`, `listDocuments`
+
+### MCP server
+
+File: `src/rag/server.ts`
+
+Exposed tools:
+- `index_document`
+- `search_documents`
+- `list_indexed`
+- `clear_index`
+
+The MCP server is created once per runtime and passed into subagents that need it.
 
 ---
 
-## Model Strategy
+## Key Configuration
 
-| Component    | Model              | Rationale                                              |
-|--------------|--------------------|--------------------------------------------------------|
-| Orchestrator | claude-sonnet-4-6  | Needs strong reasoning for ReAct loop control and gap analysis |
-| Researcher   | claude-haiku-4-5   | Simple I/O: parse task JSON, call two tools, format output |
-| Indexer      | claude-haiku-4-5   | Mechanical: parse SOURCE blocks, call index_document for each |
-| Synthesizer  | claude-haiku-4-5   | Heavier reasoning (query rewriting, answer composition) but cost-sensitive; haiku with a detailed prompt is sufficient |
+Primary session controls:
 
-The orchestrator uses `thinking: { type: 'adaptive' }`, enabling extended thinking on complex queries without paying the cost on every turn.
+- `DEEP_RESEARCH`
+- `MAX_RESEARCH_ITERATIONS`
+- `CLEAR_RAG_ON_START`
+- `INITIAL_WEB_FETCHES`
+- `GAP_WEB_FETCHES`
+- `INITIAL_WEB_SEARCHES`
+- `GAP_WEB_SEARCHES`
+
+Model controls:
+
+- `AGENT_MODEL`
+- `RESEARCHER_MODEL`
+- `INDEXER_MODEL`
+- `SYNTHESIZER_MODEL`
+
+Infrastructure:
+
+- `DATABASE_URL`
+- `ANTHROPIC_API_KEY`
+- `LOG_LEVEL`
 
 ---
 
 ## Key Architectural Decisions
 
-### 1. Orchestrator-only ReAct, subagents as pure actions
+### 1. Deterministic orchestration
 
-The ReAct loop (THINK → ACT → OBSERVE) lives entirely in the orchestrator's system prompt. Subagents are stateless workers — they receive input, do one job, return output. This keeps each agent simple and testable in isolation, and concentrates loop logic in one place.
+The pipeline order is enforced in code, not left to model discretion. This reduces ambiguity and makes failures easier to diagnose.
 
-### 2. Confidence JSON as the only cross-agent channel
+### 2. Explicit runtime bootstrap
 
-The synthesizer always ends with a structured JSON block. This is the only reliable way to pass machine-readable state back to the orchestrator across a subagent boundary. Plain text would require brittle regex; a trailing JSON block after human-readable prose is unambiguous to parse.
+RAG initialization no longer happens at import time. Startup builds a runtime explicitly and injects it into the orchestrator.
 
-### 3. In-process MCP server (no subprocess)
+### 3. Small orchestration modules
 
-The RAG server runs in the same Node.js process as the orchestrator via `createSdkMcpServer`. No socket, no subprocess, no serialization overhead. The MiniSearch index is a plain JS object in memory. Trade-off: the index is lost when the process exits, but for a single-session research tool this is acceptable and dramatically simpler than standing up a persistent store.
+The original monolithic orchestration file was split into runner, planner, presenter, config, and research-output helpers. This keeps responsibilities narrower and easier to test.
 
-### 4. BM25 over vector embeddings
+### 4. Retrieval-only synthesis
 
-MiniSearch uses BM25 (term frequency + inverse document frequency), not semantic vector search. This means:
-- No embedding model calls, no latency, no cost
-- Works well when the synthesizer uses terms that appear in source text
-- Mitigated by the synthesizer's query rewriting loop (synonyms, sub-terms, different framing when scores are low)
-- Limitation: cannot match semantically similar but lexically different content
+The synthesizer answers only from indexed knowledge, never directly from the web. This preserves the separation between evidence gathering and answer generation.
 
-### 5. Haiku for all subagents
+### 5. Source-preserving research
 
-All three subagents use `claude-haiku-4-5`. Their tasks are well-scoped and guided by detailed prompts, so the cheaper model suffices. Sonnet is reserved for the orchestrator, which must reason about gaps, compose multi-iteration strategy, and parse confidence signals. This keeps per-query cost low while maintaining quality where it matters.
+The researcher is optimized to preserve indexable evidence, not just produce a narrative summary. This matters especially for event-like and time-sensitive queries.
 
-### 6. Gap-filling with `previouslyCovered` deduplication
+### 6. Configurable cost controls
 
-On iteration 2+, the orchestrator passes the list of already-fetched URLs to the researcher. This prevents re-fetching the same pages and forces the researcher to find new sources for missing topics. Without this, gap-filling iterations would often re-index the same content and make no progress.
+Fetch/search budgets and iteration depth are env-driven so the same architecture can run as a cheap boilerplate or a more thorough research mode.
 
-### 7. Max 3 iterations / max 30 turns
+### 7. Single output path
 
-The `maxTurns: 30` cap on the orchestrator session prevents runaway loops. The ReAct protocol caps at 3 iterations by prompt instruction. At iteration 3 the synthesizer presents its best answer regardless of confidence — this ensures the system always terminates with *some* answer rather than failing silently.
-
-### 8. Separation of indexing and retrieval agents
-
-The indexer and synthesizer are separate agents rather than one combined agent. This prevents the synthesizer from being distracted by raw SOURCE blocks during answer composition, and keeps each agent's context window focused. The shared RAG MCP server is the only coupling between them.
-
-### 9. Source excerpt truncation (400 chars)
-
-`search_documents` returns only the first 400 characters of each document as an excerpt. Full documents are stored in MiniSearch but not returned verbatim. This keeps the synthesizer's context window manageable when many results are returned across multiple search calls.
-
-### 10. `permissionMode: 'bypassPermissions'`
-
-The orchestrator runs with `permissionMode: 'bypassPermissions'` so subagents can call WebSearch, WebFetch, and MCP tools without interactive approval prompts. This is appropriate for a CLI research tool where the user's intent is already expressed via the question. A production deployment would want a more restrictive permission model.
+Terminal rendering now flows through `presenter.ts` only. Duplicate legacy renderer/logger paths were removed to avoid drift.

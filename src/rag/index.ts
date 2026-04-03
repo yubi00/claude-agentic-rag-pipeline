@@ -1,15 +1,19 @@
 /**
- * Active RAG store configuration — swap backend here, nothing else changes.
+ * RAG runtime bootstrap.
+ *
+ * Creates the active store and MCP server explicitly at startup instead of
+ * doing expensive async work at module import time.
  *
  * ─── Option A: BM25 / MiniSearch (default, zero deps, in-process) ────────────
  *
- *   export const ragServer = createRagServer(new MiniSearchStore())
+ *   const store = new MiniSearchStore()
+ *   return { ragStore: store, ragServer: createRagServer(store) }
  *
  * ─── Option B: Vector / in-memory (no DB, local embeddings) ──────────────────
  *
  *   import { VectorStore, createLocalEmbedder } from './vector-store.js'
  *   const store = new VectorStore(await createLocalEmbedder())
- *   export const ragServer = createRagServer(store)
+ *   return { ragStore: store, ragServer: createRagServer(store) }
  *
  * ─── Option C: Neon pgvector (production, persistent) ── ACTIVE ──────────────
  *
@@ -18,18 +22,28 @@
  */
 
 import { NeonVectorStore } from './neon-store.js'
+import type { IRagStore } from './interface.js'
 import { createLocalEmbedder } from './vector-store.js'
 import { createRagServer } from './server.js'
 import { InitError } from './errors.js'
 
-const connectionString = process.env.DATABASE_URL
-if (!connectionString) {
-  throw new InitError('DATABASE_URL environment variable is not set')
+export interface RagRuntime {
+  ragStore: IRagStore
+  ragServer: ReturnType<typeof createRagServer>
 }
 
-const embedFn = await createLocalEmbedder()
-const store = new NeonVectorStore(connectionString, embedFn)
-await store.initialize()
+export async function initializeRagRuntime(): Promise<RagRuntime> {
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) {
+    throw new InitError('DATABASE_URL environment variable is not set')
+  }
 
-export const ragStore = store
-export const ragServer = createRagServer(store)
+  const embedFn = await createLocalEmbedder()
+  const store = new NeonVectorStore(connectionString, embedFn)
+  await store.initialize()
+
+  return {
+    ragStore: store,
+    ragServer: createRagServer(store),
+  }
+}

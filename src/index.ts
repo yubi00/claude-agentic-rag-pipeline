@@ -9,6 +9,7 @@
  */
 
 import { runResearchSession } from './orchestrator/index.js'
+import { initializeRagRuntime } from './rag/index.js'
 
 async function main(): Promise<void> {
   const question = process.argv.slice(2).join(' ').trim()
@@ -30,7 +31,8 @@ async function main(): Promise<void> {
   console.log(`\nResearching: "${question}"\n`)
   console.log(`Mode: deepResearch=${deepResearch}\n`)
 
-  await runResearchSession(question, { deepResearch })
+  const runtime = await initializeRagRuntime()
+  await runResearchSession(question, runtime, { deepResearch })
 }
 
 main().catch(err => {

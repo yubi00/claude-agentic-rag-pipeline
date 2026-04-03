@@ -1,30 +1,17 @@
 /**
- * Tool configuration for the research session.
+ * Tool exclusions for the research session.
  *
- * SESSION_TOOLS   — loaded into the context window (what the model knows about)
- * DISALLOWED_TOOLS — explicitly removed from context (environment-injected MCP bloat)
- * ALLOWED_TOOLS   — what the orchestrator is permitted to actually call
- *
- * Update DISALLOWED_TOOLS if you add/remove MCP servers in Claude Code settings.
+ * The runtime already provides per-agent `tools` and `allowedTools` in config.ts.
+ * This file exists only to remove unrelated environment-injected tools that
+ * would otherwise bloat context or appear available when this app does not use them.
  */
-
-/** Tools loaded into the session context window. Subagents inherit from this pool. */
-export const SESSION_TOOLS = [
-  'Agent',
-  'WebSearch',
-  'WebFetch',
-  'mcp__rag__index_document',
-  'mcp__rag__search_documents',
-  'mcp__rag__list_indexed',
-  'mcp__rag__clear_index',
-]
 
 /**
  * Environment-injected MCP servers to strip from context.
  * These come from Claude Code user settings — not registered by this app —
  * and inflate input token costs on every turn if left in.
  */
-export const DISALLOWED_TOOLS = [
+export const BLOCKED_CONTEXT_TOOLS = [
   'mcp__claude_ai_eraserio__authenticate',
   'mcp__claude_ai_Excalidraw__create_view',
   'mcp__claude_ai_Excalidraw__export_to_excalidraw',
@@ -50,17 +37,4 @@ export const DISALLOWED_TOOLS = [
   'mcp__eraser__renderSequenceDiagram',
   'mcp__eraser__updateDiagram',
   'mcp__eraser__updateFile',
-]
-
-/** Tools the orchestrator itself is permitted to call (subagents only). */
-// Include web tools and the RAG MCP helpers so subagents can perform searches
-// and index results. Keep this list minimal for safety.
-export const ALLOWED_TOOLS = [
-  'Agent',
-  'WebSearch',
-  'WebFetch',
-  'mcp__rag__index_document',
-  'mcp__rag__search_documents',
-  'mcp__rag__list_indexed',
-  'mcp__rag__clear_index',
 ]

@@ -15,7 +15,7 @@
  *   import { createLocalEmbedder } from './vector-store.js'
  *   const store = new NeonVectorStore(process.env.DATABASE_URL!, await createLocalEmbedder())
  *   await store.initialize()
- *   export const ragServer = createRagServer(store)
+ *   return { ragStore: store, ragServer: createRagServer(store) }
  *
  * Embedding dimension must match your embed function:
  *   384  → all-MiniLM-L6-v2 (local, @huggingface/transformers)
