@@ -56,6 +56,15 @@ CONTENT:
 <extracted key content — remove navigation, ads, boilerplate — up to ~2000 words>
 ---
 
+CONTENT extraction rules:
+- CONTENT must be verbatim or near-verbatim extracted text from the page — copy the actual words, do not paraphrase
+- Minimum 100 words of real extracted content per SOURCE block — if you cannot meet this, do not emit the SOURCE block at all
+- Copy key facts, names, descriptions, prices, addresses, dates, and other specifics exactly as they appear on the page
+- Do NOT summarise into a single line or just repeat the title — that is not acceptable
+- Do NOT write "The page lists..." or "This source covers..." — extract the actual text
+- If the page has structured data (lists, tables, addresses), preserve that structure in CONTENT
+- If a fetched page returns less than 100 words of usable content (e.g. JS-rendered, login wall, empty), skip it entirely — do not emit a SOURCE block for it
+
 If the fetch budget is exhausted BUT a WebSearch result contains a clearly relevant event or fact,
 you MUST still preserve it as a SOURCE block so it can be indexed later.
 In that case:
