@@ -1,6 +1,6 @@
 # Architecture: claude-agentinc-rag
 
-Agentic RAG research pipeline built with the Claude Agent SDK.
+Agentic RAG research pipeline with a provider-agnostic agent runner interface.
 
 The current architecture is code-controlled, not prompt-controlled. The runtime executes a deterministic sequence:
 
@@ -36,7 +36,8 @@ src/index.ts
   - reads CLI question
   - validates env
   - calls initializeRagRuntime()
-  - calls runResearchSession(question, runtime)
+  - constructs IAgentRunner (ClaudeAgentRunner or VercelAgentRunner)
+  - calls runResearchSession(question, runtime, runner)
   |
   v
 src/rag/index.ts
@@ -48,7 +49,7 @@ src/rag/index.ts
   v
 src/orchestrator/index.ts
   - runs deterministic iteration loop
-  - researcher -> indexer -> synthesizer
+  - researcher -> index (code) -> synthesizer
   - parses confidence
   - retries only when policy says to retry
 ```
@@ -66,13 +67,16 @@ claude-agentinc-rag/
 │   │   └── synthesizer.ts          # Retrieval + answer prompt
 │   ├── orchestrator/
 │   │   ├── index.ts                # Session loop
-│   │   ├── agentRunner.ts          # Claude SDK agent execution
+│   │   ├── runner/
+│   │   │   ├── interface.ts        # IAgentRunner contract
+│   │   │   ├── claudeAgentRunner.ts # Claude Agent SDK implementation
+│   │   │   └── vercelAgentRunner.ts # Vercel AI SDK + Gemini implementation
 │   │   ├── planner.ts              # Query planning and stop policy
 │   │   ├── presenter.ts            # Terminal rendering
-│   │   ├── researchOutput.ts       # SOURCE parsing and dedupe
+│   │   ├── researchOutput.ts       # SOURCE parsing, dedupe, and RAG indexing
 │   │   ├── config.ts               # env-backed config
-│   │   ├── limiter.ts              # Web tool budgets
-│   │   ├── toolConfig.ts           # tool allow/deny lists
+│   │   ├── limiter.ts              # Web tool budgets (Claude runner only)
+│   │   ├── toolConfig.ts           # tool allow/deny lists (Claude runner only)
 │   │   └── types.ts                # orchestrator shared types
 │   ├── rag/
 │   │   ├── index.ts                # explicit RAG runtime bootstrap
@@ -99,10 +103,12 @@ index.ts
   |     └── rag/server.ts
   |
   └── orchestrator/index.ts
-        ├── orchestrator/agentRunner.ts
+        ├── orchestrator/runner/interface.ts
+        ├── orchestrator/runner/claudeAgentRunner.ts
+        ├── orchestrator/runner/vercelAgentRunner.ts
         ├── orchestrator/planner.ts
         ├── orchestrator/presenter.ts
-        ├── orchestrator/researchOutput.ts
+        ├── orchestrator/researchOutput.ts  (includes indexResearchOutput)
         └── agents/{researcher,synthesizer}.ts
 ```
 
@@ -278,17 +284,22 @@ Primary session controls:
 - `INITIAL_WEB_SEARCHES`
 - `GAP_WEB_SEARCHES`
 
-Model controls:
+Provider controls:
 
-- `AGENT_MODEL`
-- `RESEARCHER_MODEL`
-- `INDEXER_MODEL`
-- `SYNTHESIZER_MODEL`
+- `AGENT_PROVIDER` — `claude` (default) or `vercel`
+
+Claude provider:
+- `AGENT_MODEL` / `RESEARCHER_MODEL` / `SYNTHESIZER_MODEL`
+- `ANTHROPIC_API_KEY`
+
+Vercel/Gemini provider:
+- `GEMINI_MODEL` — defaults to `gemini-2.0-flash`
+- `GOOGLE_GENERATIVE_AI_API_KEY`
+- `TAVILY_API_KEY`
 
 Infrastructure:
 
 - `DATABASE_URL`
-- `ANTHROPIC_API_KEY`
 - `LOG_LEVEL`
 
 ---
@@ -326,3 +337,13 @@ Terminal rendering now flows through `presenter.ts` only. Duplicate legacy rende
 ### 8. Code-based indexing, no indexer agent
 
 RAG ingestion is handled by `indexResearchOutput()` in `researchOutput.ts`, not a subagent. The researcher emits structured `SOURCE` blocks; parsing and storing them is mechanical and needs no model judgment. This removes one LLM call per iteration with no loss of capability. Indexing progress is captured via structured logs (`doc.indexed` per document, `indexer.done` per iteration).
+
+### 9. Provider-agnostic agent runner
+
+Agent execution is abstracted behind `IAgentRunner` in `orchestrator/runner/interface.ts`. The orchestrator only calls `runner.run(agent, prompt, runtime, budget)` and receives `AgentRunResult` — it has no knowledge of which SDK or model is in use.
+
+Two implementations ship out of the box:
+- `ClaudeAgentRunner` — uses the Claude Agent SDK with native `WebSearch`/`WebFetch` tools and MCP server support
+- `VercelAgentRunner` — uses Vercel AI SDK `ToolLoopAgent` with Gemini via `@ai-sdk/google`, Tavily for web search, and raw fetch for page content
+
+The active runner is selected at startup via `AGENT_PROVIDER` env var and injected into `runResearchSession()`. Adding a new provider means implementing `IAgentRunner` only — the rest of the pipeline is unchanged.

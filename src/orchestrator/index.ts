@@ -5,7 +5,7 @@
 import { logger } from '../libs/logger.js'
 import { D, R, YE } from '../libs/ansi.js'
 import { parseConfidenceBlock, type ConfidenceBlock } from '../utils/index.js'
-import { runAgent } from './agentRunner.js'
+import type { IAgentRunner } from './runner/interface.js'
 import { CLEAR_RAG_ON_START, DEFAULT_DEEP_RESEARCH, MAX_ITERATIONS } from './config.js'
 import { buildResearchTask, buildSynthesizerPrompt, getResearchBudget, shouldStop } from './planner.js'
 import { logConfidenceDecision, renderFinalAnswer } from './presenter.js'
@@ -15,6 +15,7 @@ import type { ResearchRuntime, ResearchSessionOptions, SessionTotals } from './t
 export async function runResearchSession(
     question: string,
     runtime: ResearchRuntime,
+    runner: IAgentRunner,
     options: ResearchSessionOptions = {}
 ): Promise<void> {
     const deepResearch = options.deepResearch ?? DEFAULT_DEEP_RESEARCH
@@ -45,7 +46,7 @@ export async function runResearchSession(
             previouslyCovered: [...previouslyCovered],
             budget: researchBudget,
         })
-        const researcher = await runAgent('researcher', researcherTask, runtime, researchBudget)
+        const researcher = await runner.run('researcher', researcherTask, runtime, researchBudget)
         totals.turns += researcher.turns
         totals.costUsd += researcher.costUsd
 
@@ -76,7 +77,7 @@ export async function runResearchSession(
         logger.info({ event: 'indexer.done', indexed: indexedCount })
 
         const synthesizerPrompt = buildSynthesizerPrompt(question, iteration, finalConfidence)
-        const synthesizer = await runAgent('synthesizer', synthesizerPrompt, runtime)
+        const synthesizer = await runner.run('synthesizer', synthesizerPrompt, runtime)
         totals.turns += synthesizer.turns
         totals.costUsd += synthesizer.costUsd
 

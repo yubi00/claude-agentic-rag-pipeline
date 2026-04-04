@@ -1,6 +1,6 @@
 # claude-agentinc-rag
 
-Deterministic multi-agent RAG pipeline built with the Claude Agent SDK, web research, indexed retrieval, and confidence-based synthesis.
+Deterministic multi-agent RAG pipeline with a provider-agnostic runner interface, web research, indexed retrieval, and confidence-based synthesis.
 
 This project is a small, code-controlled research system rather than a prompt-only orchestration demo. It runs a fixed pipeline:
 
@@ -20,6 +20,7 @@ Most agent demos blur orchestration, retrieval, prompting, and output handling i
 - retrieval-backed synthesis instead of direct web-to-answer generation
 - confidence-based retry logic instead of a single pass with no coverage feedback
 - modular orchestration code that is easier to extend and reason about
+- provider-agnostic runner interface — swap Claude, Gemini, or any model behind one contract
 
 ## What It Does
 
@@ -64,8 +65,9 @@ Current default behavior:
 ### Prerequisites
 
 - Node.js 20+
-- an `ANTHROPIC_API_KEY`
 - a `DATABASE_URL` for Neon Postgres with pgvector support
+- **Claude provider** (default): `ANTHROPIC_API_KEY`
+- **Vercel/Gemini provider**: `GOOGLE_GENERATIVE_AI_API_KEY` (free at aistudio.google.com) + `TAVILY_API_KEY` (free tier at tavily.com)
 
 ### Setup
 
@@ -76,10 +78,19 @@ npm install
 cp .env.example .env
 ```
 
-Set these environment variables in `.env`:
+Set these environment variables in `.env`. For the default Claude provider:
 
 ```bash
 ANTHROPIC_API_KEY=...
+DATABASE_URL=...
+```
+
+Or to use Gemini (cheaper, free tier available):
+
+```bash
+AGENT_PROVIDER=vercel
+GOOGLE_GENERATIVE_AI_API_KEY=...
+TAVILY_API_KEY=...
 DATABASE_URL=...
 ```
 
@@ -103,13 +114,18 @@ npm run build
 - `src/rag/index.ts`: explicit runtime bootstrap returning `{ ragStore, ragServer }`
 - `src/orchestrator/index.ts`: session loop and retry flow
 
+### Agent runner
+
+- `src/orchestrator/runner/interface.ts`: `IAgentRunner` contract
+- `src/orchestrator/runner/claudeAgentRunner.ts`: Claude Agent SDK implementation
+- `src/orchestrator/runner/vercelAgentRunner.ts`: Vercel AI SDK + Gemini implementation
+
 ### Orchestration modules
 
-- `src/orchestrator/agentRunner.ts`: Claude SDK execution per agent
 - `src/orchestrator/planner.ts`: query planning and stop policy
 - `src/orchestrator/presenter.ts`: terminal rendering and progress output
 - `src/orchestrator/researchOutput.ts`: SOURCE parsing, URL dedupe, and direct RAG indexing
-- `src/orchestrator/limiter.ts`: web tool budgets
+- `src/orchestrator/limiter.ts`: web tool budgets (Claude runner only)
 - `src/orchestrator/config.ts`: env-backed configuration
 
 ### Agents
@@ -174,9 +190,13 @@ Important environment variables:
 | `GAP_WEB_FETCHES` | Later-pass fetch budget |
 | `INITIAL_WEB_SEARCHES` | First-pass search budget |
 | `GAP_WEB_SEARCHES` | Later-pass search budget |
-| `RESEARCHER_MODEL` | Research agent model override |
-| `SYNTHESIZER_MODEL` | Synthesizer model override |
-| `ANTHROPIC_API_KEY` | Claude API access |
+| `AGENT_PROVIDER` | `claude` (default) or `vercel` |
+| `ANTHROPIC_API_KEY` | Claude API access (claude provider) |
+| `RESEARCHER_MODEL` | Research agent model override (claude provider) |
+| `SYNTHESIZER_MODEL` | Synthesizer model override (claude provider) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Gemini API key (vercel provider) |
+| `TAVILY_API_KEY` | Web search API key (vercel provider) |
+| `GEMINI_MODEL` | Gemini model override, default `gemini-2.0-flash` (vercel provider) |
 | `DATABASE_URL` | Neon/Postgres connection string |
 
 Practical guidance:

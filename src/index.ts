@@ -9,6 +9,8 @@
  */
 
 import { runResearchSession } from './orchestrator/index.js'
+import { ClaudeAgentRunner } from './orchestrator/runner/claudeAgentRunner.js'
+import { VercelAgentRunner } from './orchestrator/runner/vercelAgentRunner.js'
 import { initializeRagRuntime } from './rag/index.js'
 
 async function main(): Promise<void> {
@@ -20,19 +22,17 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('\nError: ANTHROPIC_API_KEY environment variable is not set.')
-    console.error('Set it with: export ANTHROPIC_API_KEY=sk-ant-...')
-    process.exit(1)
-  }
-
   const deepResearch = process.env.DEEP_RESEARCH === 'true'
 
   console.log(`\nResearching: "${question}"\n`)
   console.log(`Mode: deepResearch=${deepResearch}\n`)
 
+  const agentProvider = process.env.AGENT_PROVIDER || 'vercel'
+  console.log(`Using agent provider: ${agentProvider}\n`)
+
   const runtime = await initializeRagRuntime()
-  await runResearchSession(question, runtime, { deepResearch })
+  const runner = agentProvider === 'vercel' ? new VercelAgentRunner() : new ClaudeAgentRunner()
+  await runResearchSession(question, runtime, runner, { deepResearch })
 }
 
 main().catch(err => {
