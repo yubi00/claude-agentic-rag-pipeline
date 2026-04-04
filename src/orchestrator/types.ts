@@ -1,7 +1,7 @@
 import type { ConfidenceBlock } from '../utils/index.js'
 import type { RagRuntime } from '../rag/index.js'
 
-export type AgentName = 'researcher' | 'indexer' | 'synthesizer'
+export type AgentName = 'researcher' | 'synthesizer'
 export type JsonRecord = Record<string, unknown>
 
 export interface AgentRunResult {

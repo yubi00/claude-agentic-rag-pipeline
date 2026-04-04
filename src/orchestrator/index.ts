@@ -9,7 +9,7 @@ import { runAgent } from './agentRunner.js'
 import { CLEAR_RAG_ON_START, DEFAULT_DEEP_RESEARCH, MAX_ITERATIONS } from './config.js'
 import { buildResearchTask, buildSynthesizerPrompt, getResearchBudget, shouldStop } from './planner.js'
 import { logConfidenceDecision, renderFinalAnswer } from './presenter.js'
-import { dedupeResearchOutput, extractSourceUrls, normalizeUrl, stripConfidenceBlock } from './researchOutput.js'
+import { dedupeResearchOutput, extractSourceUrls, indexResearchOutput, normalizeUrl, stripConfidenceBlock } from './researchOutput.js'
 import type { ResearchRuntime, ResearchSessionOptions, SessionTotals } from './types.js'
 
 export async function runResearchSession(
@@ -72,9 +72,8 @@ export async function runResearchSession(
             continue
         }
 
-        const indexer = await runAgent('indexer', dedupedResearch.text, runtime)
-        totals.turns += indexer.turns
-        totals.costUsd += indexer.costUsd
+        const indexedCount = await indexResearchOutput(dedupedResearch.text, runtime.ragStore)
+        logger.info({ event: 'indexer.done', indexed: indexedCount })
 
         const synthesizerPrompt = buildSynthesizerPrompt(question, iteration, finalConfidence)
         const synthesizer = await runAgent('synthesizer', synthesizerPrompt, runtime)

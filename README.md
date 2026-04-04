@@ -5,7 +5,7 @@ Deterministic multi-agent RAG pipeline built with the Claude Agent SDK, web rese
 This project is a small, code-controlled research system rather than a prompt-only orchestration demo. It runs a fixed pipeline:
 
 1. `researcher` gathers evidence from the web
-2. `indexer` writes that evidence into the RAG store
+2. orchestrator parses SOURCE blocks and writes directly to the RAG store (no LLM)
 3. `synthesizer` answers from indexed knowledge only
 4. the orchestrator decides whether to stop or run another targeted pass
 
@@ -23,7 +23,7 @@ Most agent demos blur orchestration, retrieval, prompting, and output handling i
 
 ## What It Does
 
-- runs a `researcher -> indexer -> synthesizer` pipeline
+- runs a `researcher -> index -> synthesizer` pipeline
 - gathers live web evidence with `WebSearch` and `WebFetch`
 - stores evidence in a RAG backend exposed through an in-process MCP server
 - synthesizes answers only from indexed knowledge
@@ -44,9 +44,9 @@ initializeRagRuntime()
   v
 runResearchSession(question, runtime)
   |
-  +--> researcher  -> WebSearch + WebFetch -> SOURCE blocks
-  +--> indexer     -> index_document + list_indexed
-  +--> synthesizer -> search_documents -> cited answer + confidence JSON
+  +--> researcher         -> WebSearch + WebFetch -> SOURCE blocks
+  +--> indexResearchOutput() [code] -> ragStore.addDocument() per source
+  +--> synthesizer        -> search_documents -> cited answer + confidence JSON
   |
   +--> low confidence    -> targeted retry
   +--> medium/high       -> stop
@@ -108,15 +108,16 @@ npm run build
 - `src/orchestrator/agentRunner.ts`: Claude SDK execution per agent
 - `src/orchestrator/planner.ts`: query planning and stop policy
 - `src/orchestrator/presenter.ts`: terminal rendering and progress output
-- `src/orchestrator/researchOutput.ts`: SOURCE parsing and URL dedupe
+- `src/orchestrator/researchOutput.ts`: SOURCE parsing, URL dedupe, and direct RAG indexing
 - `src/orchestrator/limiter.ts`: web tool budgets
 - `src/orchestrator/config.ts`: env-backed configuration
 
 ### Agents
 
 - `src/agents/researcher.ts`: gathers evidence from the web
-- `src/agents/indexer.ts`: turns SOURCE blocks into indexed documents
 - `src/agents/synthesizer.ts`: answers using retrieved documents only
+
+RAG ingestion is handled in code by `indexResearchOutput()` in `researchOutput.ts` — no LLM agent needed.
 
 ## Customizing for a New Domain
 
@@ -142,9 +143,9 @@ Examples:
 - support assistant: probable cause, remediation, verification steps
 - market scan: vendor summary, comparison, risks, gaps
 
-### `src/agents/indexer.ts`
+### `src/orchestrator/researchOutput.ts`
 
-Change this if you change the source format. If your researcher no longer emits `SOURCE` blocks, the indexer prompt should evolve with it.
+Change `parseSourceBlocks()` here if you change the SOURCE block format in the researcher. The field names (`SOURCE`, `TITLE`, `RELEVANCE`, `CONTENT`) are parsed with simple regex — update them to match any format changes in the researcher prompt.
 
 ### `src/rag/index.ts`
 
@@ -174,7 +175,6 @@ Important environment variables:
 | `INITIAL_WEB_SEARCHES` | First-pass search budget |
 | `GAP_WEB_SEARCHES` | Later-pass search budget |
 | `RESEARCHER_MODEL` | Research agent model override |
-| `INDEXER_MODEL` | Indexer model override |
 | `SYNTHESIZER_MODEL` | Synthesizer model override |
 | `ANTHROPIC_API_KEY` | Claude API access |
 | `DATABASE_URL` | Neon/Postgres connection string |

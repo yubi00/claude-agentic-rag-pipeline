@@ -72,12 +72,14 @@ export function renderAgentMessage(agent: AgentName, msg: SdkStreamMessage): voi
         if (toolName === 'WebSearch') {
             const urlCount = (resultText.match(/https?:\/\//g) ?? []).length
             console.log(`  ${AGENT_COLORS[agent]}[${agent}:WebSearch  ◀]${R} ${D}${urlCount} URL(s) returned${R}`)
+            console.log(`  ${D}[${agent}] analysing results...${R}`)
             return
         }
 
         if (toolName === 'WebFetch') {
             const fetched = resultText.length > 0 ? `${resultText.length} chars fetched` : 'empty response'
             console.log(`  ${AGENT_COLORS[agent]}[${agent}:WebFetch   ◀]${R} ${D}${fetched}${R}`)
+            console.log(`  ${D}[${agent}] analysing results...${R}`)
             return
         }
 
@@ -159,6 +161,7 @@ function logToolCall(agent: AgentName, toolName: string, input: JsonRecord): voi
     if (toolName === 'WebFetch') {
         const url = String(input.url ?? input.prompt ?? '').slice(0, 160)
         console.log(`  ${AGENT_COLORS[agent]}[${agent}:WebFetch   ▶]${R} ${D}${url}${R}`)
+        console.log(`  ${D}[${agent}] fetching page, this may take a moment...${R}`)
         return
     }
 

@@ -1,4 +1,33 @@
+import type { IRagStore } from '../rag/interface.js'
 import type { DedupedResearchResult } from './types.js'
+
+interface ParsedSource {
+    url: string
+    title: string
+    content: string
+    relevanceNote: string
+}
+
+export function parseSourceBlocks(text: string): ParsedSource[] {
+    const blocks = text.match(/---\nSOURCE:[\s\S]*?(?=\n---\nSOURCE:|\nRESEARCH SUMMARY:|---\s*$|$)/g) ?? []
+    return blocks.flatMap(block => {
+        const url = block.match(/^SOURCE:\s*(.+)$/m)?.[1]?.trim()
+        const title = block.match(/^TITLE:\s*(.+)$/m)?.[1]?.trim()
+        const relevanceNote = block.match(/^RELEVANCE:\s*(.+)$/m)?.[1]?.trim() ?? ''
+        const contentMatch = block.match(/^CONTENT:\n([\s\S]*?)(?:\n---\s*$|$)/m)
+        const content = contentMatch?.[1]?.trim()
+        if (!url || !content) return []
+        return [{ url, title: title ?? url, content, relevanceNote }]
+    })
+}
+
+export async function indexResearchOutput(text: string, ragStore: IRagStore): Promise<number> {
+    const sources = parseSourceBlocks(text)
+    await Promise.all(
+        sources.map(s => ragStore.addDocument({ url: s.url, title: s.title, content: s.content }))
+    )
+    return sources.length
+}
 
 export function extractSourceUrls(text: string): string[] {
     return [...text.matchAll(/^SOURCE:\s*(.+)$/gm)].map(match => match[1].trim())

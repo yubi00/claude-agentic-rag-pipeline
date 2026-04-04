@@ -5,7 +5,7 @@ Agentic RAG research pipeline built with the Claude Agent SDK.
 The current architecture is code-controlled, not prompt-controlled. The runtime executes a deterministic sequence:
 
 1. `researcher` gathers web evidence
-2. `indexer` writes evidence into the RAG store
+2. orchestrator parses SOURCE blocks and writes directly to the RAG store (no LLM)
 3. `synthesizer` answers from indexed knowledge only
 4. the orchestrator parses confidence and decides whether to stop or run another research pass
 
@@ -63,7 +63,6 @@ claude-agentinc-rag/
 │   ├── index.ts                    # CLI entry point
 │   ├── agents/
 │   │   ├── researcher.ts           # Web evidence gathering prompt
-│   │   ├── indexer.ts              # RAG ingestion prompt
 │   │   └── synthesizer.ts          # Retrieval + answer prompt
 │   ├── orchestrator/
 │   │   ├── index.ts                # Session loop
@@ -104,7 +103,7 @@ index.ts
         ├── orchestrator/planner.ts
         ├── orchestrator/presenter.ts
         ├── orchestrator/researchOutput.ts
-        └── agents/*.ts
+        └── agents/{researcher,synthesizer}.ts
 ```
 
 ---
@@ -139,9 +138,9 @@ runResearchSession(question, runtime)
          |      - mark confidence low
          |      - retry or stop
          |
-         +--> run indexer
-         |      - index_document
-         |      - list_indexed
+         +--> indexResearchOutput() [code, no LLM]
+         |      - parseSourceBlocks()
+         |      - ragStore.addDocument() per source
          |
          +--> run synthesizer
          |      - search_documents
@@ -208,15 +207,6 @@ Important behavior:
 - preserves high-value unfetched search results when needed
 - emits event-specific `SOURCE` blocks for event-style queries when possible
 - avoids mentioning facts in summary that are not present in a `SOURCE` block
-
-### Indexer
-
-File: `src/agents/indexer.ts`
-
-- Tools: MCP `rag` tools only
-- Responsibility: transform researcher output into indexed KB documents
-- Input: raw researcher output with `SOURCE` blocks
-- Output: indexing summary and KB total count
 
 ### Synthesizer
 
@@ -332,3 +322,7 @@ Fetch/search budgets and iteration depth are env-driven so the same architecture
 ### 7. Single output path
 
 Terminal rendering now flows through `presenter.ts` only. Duplicate legacy renderer/logger paths were removed to avoid drift.
+
+### 8. Code-based indexing, no indexer agent
+
+RAG ingestion is handled by `indexResearchOutput()` in `researchOutput.ts`, not a subagent. The researcher emits structured `SOURCE` blocks; parsing and storing them is mechanical and needs no model judgment. This removes one LLM call per iteration with no loss of capability. Indexing progress is captured via structured logs (`doc.indexed` per document, `indexer.done` per iteration).
