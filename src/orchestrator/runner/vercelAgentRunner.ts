@@ -26,9 +26,8 @@ export class VercelAgentRunner implements IAgentRunner {
         const color = AGENT_COLORS[agent] ?? ''
         const startedAt = Date.now()
         const maxSteps = agent === 'synthesizer' ? 16 : 12
-        const tools = agent === 'researcher'
-            ? buildResearcherTools(color, budget)
-            : buildSynthesizerTools(agent, color, runtime)
+        const researcherCtx = agent === 'researcher' ? buildResearcherTools(color, budget) : null
+        const tools = researcherCtx?.tools ?? buildSynthesizerTools(agent, color, runtime)
 
         const agentInstance = new ToolLoopAgent({
             model: google(GEMINI_MODEL),
@@ -61,6 +60,7 @@ export class VercelAgentRunner implements IAgentRunner {
             turns: result.steps.length,
             costUsd,
             durationMs: Date.now() - startedAt,
+            failedUrls: researcherCtx?.failedUrls,
         }
     }
 }

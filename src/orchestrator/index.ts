@@ -50,6 +50,8 @@ export async function runResearchSession(
         totals.turns += researcher.turns
         totals.costUsd += researcher.costUsd
 
+        researcher.failedUrls?.forEach(url => previouslyCovered.add(normalizeUrl(url)))
+
         const dedupedResearch = dedupeResearchOutput(researcher.text, previouslyCovered)
         extractSourceUrls(dedupedResearch.text).forEach(url => previouslyCovered.add(normalizeUrl(url)))
         if (dedupedResearch.removedCount > 0) {

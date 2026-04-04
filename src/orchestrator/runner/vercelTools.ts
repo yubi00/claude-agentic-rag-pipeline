@@ -3,7 +3,17 @@ import { z } from 'zod'
 import { AGENT_COLORS, D, R } from '../../libs/ansi.js'
 import type { AgentName, ResearchBudget, ResearchRuntime } from '../types.js'
 
-export function buildResearcherTools(color: string, budget?: ResearchBudget) {
+export interface ResearcherToolContext {
+    tools: ReturnType<typeof buildResearcherToolset>
+    failedUrls: Set<string>
+}
+
+export function buildResearcherTools(color: string, budget?: ResearchBudget): ResearcherToolContext {
+    const failedUrls = new Set<string>()
+    return { tools: buildResearcherToolset(color, budget, failedUrls), failedUrls }
+}
+
+function buildResearcherToolset(color: string, budget: ResearchBudget | undefined, failedUrls: Set<string>) {
     let searchesUsed = 0
     let fetchesUsed = 0
     const maxSearches = budget?.maxSearchesTotal ?? Infinity
@@ -58,10 +68,15 @@ export function buildResearcherTools(color: string, budget?: ResearchBudget) {
                     console.log(`  ${color}[researcher:WebFetch   ◀]${R} ${D}${text.length} chars fetched${R}`)
                     console.log(`  ${D}[researcher] analysing results...${R}`)
 
-                    return text || 'Page returned no readable content.'
+                    if (!text) {
+                        failedUrls.add(url)
+                        return 'Page returned no readable content.'
+                    }
+                    return text
                 } catch (err) {
                     const msg = err instanceof Error ? err.message : String(err)
                     console.log(`  ${color}[researcher:WebFetch   ◀]${R} ${D}failed: ${msg}${R}`)
+                    failedUrls.add(url)
                     return `Failed to fetch ${url}: ${msg}`
                 }
             },

@@ -9,6 +9,7 @@ export interface AgentRunResult {
     turns: number
     costUsd: number
     durationMs: number
+    failedUrls?: Set<string>
 }
 
 export interface SessionTotals {
