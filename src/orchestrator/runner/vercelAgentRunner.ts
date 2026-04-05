@@ -26,7 +26,7 @@ export class VercelAgentRunner implements IAgentRunner {
         const color = AGENT_COLORS[agent] ?? ''
         const startedAt = Date.now()
         const maxSteps = agent === 'synthesizer' ? 16 : 12
-        const researcherCtx = agent === 'researcher' ? buildResearcherTools(color, budget) : null
+        const researcherCtx = agent === 'researcher' ? buildResearcherTools(color, budget, runtime.ragStore) : null
         const tools = researcherCtx?.tools ?? buildSynthesizerTools(agent, color, runtime)
 
         const budgetStop = researcherCtx

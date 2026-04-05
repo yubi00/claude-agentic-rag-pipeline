@@ -47,59 +47,34 @@ Avoid re-fetching URLs listed in previouslyCovered.
 
 ## Output format
 
-For each successfully fetched page, output one block:
----
+For each successfully fetched page, output ONE marker block:
+<<<SOURCE>>>
 SOURCE: <url>
 TITLE: <page title>
 RELEVANCE: <1-2 sentences why this source is relevant>
-CONTENT:
-<extracted key content — remove navigation, ads, boilerplate — up to ~2000 words>
----
+<<<END>>>
 
-CONTENT extraction rules:
-- CONTENT must be verbatim or near-verbatim extracted text from the page — copy the actual words, do not paraphrase
-- Minimum 100 words of real extracted content per SOURCE block — if you cannot meet this, do not emit the SOURCE block at all
-- Copy key facts, names, descriptions, prices, addresses, dates, and other specifics exactly as they appear on the page
-- Do NOT summarise into a single line or just repeat the title — that is not acceptable
-- Do NOT write "The page lists..." or "This source covers..." — extract the actual text
-- If the page has structured data (lists, tables, addresses), preserve that structure in CONTENT
-- If a fetched page returns less than 100 words of usable content (e.g. JS-rendered, login wall, empty), skip it entirely — do not emit a SOURCE block for it
-
-If the fetch budget is exhausted BUT a WebSearch result contains a clearly relevant event or fact,
-you MUST still preserve it as a SOURCE block so it can be indexed later.
-In that case:
-- use the search result URL as SOURCE
-- use the search result title as TITLE
-- make RELEVANCE explicitly say this came from a WebSearch snippet and was not fully fetched
-- put the search snippet plus any clearly inferable structured details in CONTENT
-- prefix CONTENT with: "UNFETCHED SEARCH RESULT:"
-
-Only do this for high-value findings that would otherwise be lost.
+ONE SOURCE BLOCK PER FETCHED URL. The full page content is already indexed automatically — do NOT include a CONTENT field.
 Do not emit duplicate SOURCE blocks for the same URL.
 
 ## Critical requirement
 
-- If you mention an event, fact, date, time, venue, or location in your final summary,
-  that item MUST already appear inside at least one SOURCE block above.
-- Never put new facts only in RESEARCH SUMMARY.
-- If you found 2 usable events, you should normally output at least 2 SOURCE blocks.
-- If no valid SOURCE blocks can be produced, explicitly say:
+- Output one SOURCE block per successfully fetched URL.
+- If no pages could be fetched, explicitly say:
   RESEARCH SUMMARY: No indexable sources found.
-- Do not output a summary that claims comprehensive findings unless the relevant SOURCE blocks are present above.
+- Do not claim comprehensive findings in RESEARCH SUMMARY unless SOURCE blocks are present above.
 
 ## Event-query handling
 
-For event-style queries involving concerts, festivals, gigs, shows, schedules, date ranges, or locations:
-- If a source page contains multiple event candidates, break them out into separate SOURCE blocks when possible.
-- Prefer one SOURCE block per event when you can extract:
-  - event name
-  - date or date range
-  - venue or location
-  - source URL
-- In those cases, TITLE should be the event name, not just the page title.
-- CONTENT should contain the event-specific facts only, not the whole page summary.
-- If a listing page mentions an event like "Neplayland Music Fest - April 6, 2026 - Melbourne", preserve that as its own SOURCE block if the date and location are clear enough to be useful.
-- Do not collapse multiple distinct events into a single vague SOURCE block if they can be separated.
+ONLY apply this section when the query is explicitly about time-bound events: concerts, festivals, gigs, shows, exhibitions with specific dates.
+Do NOT apply this to queries about places, trails, restaurants, parks, guides, or general "best of" lists.
+
+For qualifying event queries:
+- If a source page contains multiple distinct events, break them into separate SOURCE blocks only if each event has: name, date, venue/location, and source URL.
+- TITLE should be the event name.
+- CONTENT should contain the event-specific facts.
+- If a listing page mentions an event like "Music Fest - April 6, 2026 - Melbourne", preserve that as its own SOURCE block if date and location are clear.
+- Do not split a rich article into per-item micro-blocks for non-event queries — keep the full article content in one SOURCE block instead.
 
 After all sources:
 RESEARCH SUMMARY: Fetched N sources covering: [list of topics covered]`

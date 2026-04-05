@@ -9,24 +9,20 @@ interface ParsedSource {
 }
 
 export function parseSourceBlocks(text: string): ParsedSource[] {
-    const blocks = text.match(/---\nSOURCE:[\s\S]*?(?=\n---\nSOURCE:|\nRESEARCH SUMMARY:|---\s*$|$)/g) ?? []
+    const blocks = text.match(/<<<SOURCE>>>[\s\S]*?<<<END>>>/g) ?? []
     return blocks.flatMap(block => {
         const url = block.match(/^SOURCE:\s*(.+)$/m)?.[1]?.trim()
         const title = block.match(/^TITLE:\s*(.+)$/m)?.[1]?.trim()
         const relevanceNote = block.match(/^RELEVANCE:\s*(.+)$/m)?.[1]?.trim() ?? ''
-        const contentMatch = block.match(/^CONTENT:\n([\s\S]*?)(?:\n---\s*$|$)/m)
-        const content = contentMatch?.[1]?.trim()
-        if (!url || !content) return []
-        return [{ url, title: title ?? url, content, relevanceNote }]
+        if (!url) return []
+        // Content is indexed directly by the tool — use url as placeholder so deduplication works
+        return [{ url, title: title ?? url, content: url, relevanceNote }]
     })
 }
 
-export async function indexResearchOutput(text: string, ragStore: IRagStore): Promise<number> {
-    const sources = parseSourceBlocks(text)
-    await Promise.all(
-        sources.map(s => ragStore.addDocument({ url: s.url, title: s.title, content: s.content }))
-    )
-    return sources.length
+export async function indexResearchOutput(text: string, _ragStore: IRagStore): Promise<number> {
+    // Content is indexed directly in the WebFetch tool — just return the source count
+    return parseSourceBlocks(text).length
 }
 
 export function extractSourceUrls(text: string): string[] {
@@ -34,7 +30,7 @@ export function extractSourceUrls(text: string): string[] {
 }
 
 export function dedupeResearchOutput(text: string, previouslyCovered: Set<string>): DedupedResearchResult {
-    const blocks = text.match(/---\nSOURCE:[\s\S]*?(?=\n---\nSOURCE:|\nRESEARCH SUMMARY:|$)/g) ?? []
+    const blocks = text.match(/<<<SOURCE>>>[\s\S]*?<<<END>>>/g) ?? []
     if (blocks.length === 0) return { text, removedCount: 0 }
 
     const keptBlocks: string[] = []

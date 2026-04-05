@@ -2,6 +2,7 @@ import { tool } from 'ai'
 import { z } from 'zod'
 import { AGENT_COLORS, D, R } from '../../libs/ansi.js'
 import type { AgentName, ResearchBudget, ResearchRuntime } from '../types.js'
+import type { IRagStore } from '../../rag/interface.js'
 
 export interface ResearcherToolContext {
     tools: ReturnType<typeof buildResearcherToolset>
@@ -9,13 +10,13 @@ export interface ResearcherToolContext {
     isBudgetExhausted: () => boolean
 }
 
-export function buildResearcherTools(color: string, budget?: ResearchBudget): ResearcherToolContext {
+export function buildResearcherTools(color: string, budget?: ResearchBudget, ragStore?: IRagStore): ResearcherToolContext {
     const failedUrls = new Set<string>()
     const usage = { searches: 0, fetches: 0 }
     const maxSearches = budget?.maxSearchesTotal ?? Infinity
     const maxFetches = budget?.maxFetchesTotal ?? Infinity
     return {
-        tools: buildResearcherToolset(color, budget, failedUrls, usage),
+        tools: buildResearcherToolset(color, budget, failedUrls, usage, ragStore),
         failedUrls,
         isBudgetExhausted: () => usage.searches >= maxSearches && usage.fetches >= maxFetches,
     }
@@ -25,7 +26,8 @@ function buildResearcherToolset(
     color: string,
     budget: ResearchBudget | undefined,
     failedUrls: Set<string>,
-    usage: { searches: number; fetches: number }
+    usage: { searches: number; fetches: number },
+    ragStore?: IRagStore
 ) {
     const maxSearches = budget?.maxSearchesTotal ?? Infinity
     const maxFetches = budget?.maxFetchesTotal ?? Infinity
@@ -66,24 +68,33 @@ function buildResearcherToolset(
                 usage.fetches++
 
                 console.log(`  ${color}[researcher:WebFetch   ▶]${R} ${D}${url.slice(0, 160)}${R}`)
-                console.log(`  ${D}[researcher] fetching page, this may take a moment...${R}`)
+                console.log(`  ${D}[researcher] fetching via Jina Reader...${R}`)
 
                 try {
-                    const res = await fetch(url, {
-                        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; research-bot/1.0)' },
-                        signal: AbortSignal.timeout(15_000),
+                    const res = await fetch(`https://r.jina.ai/${url}`, {
+                        headers: {
+                            'Accept': 'text/plain',
+                            'X-Timeout': '15',
+                        },
+                        signal: AbortSignal.timeout(20_000),
                     })
-                    const html = await res.text()
-                    const text = extractText(html).slice(0, 12_000)
+                    const text = (await res.text()).slice(0, 12_000)
 
                     console.log(`  ${color}[researcher:WebFetch   ◀]${R} ${D}${text.length} chars fetched${R}`)
                     console.log(`  ${D}[researcher] analysing results...${R}`)
 
-                    if (!text) {
+                    if (text.length < 100) {
                         failedUrls.add(url)
                         return 'Page returned no readable content.'
                     }
-                    return text
+
+                    if (ragStore) {
+                        const title = text.match(/^Title:\s*(.+)$/m)?.[1]?.trim() ?? url
+                        await ragStore.addDocument({ url, title, content: text })
+                        console.log(`  ${D}[researcher:WebFetch] indexed: ${title.slice(0, 80)}${R}`)
+                    }
+
+                    return `Fetched and indexed: ${url}`
                 } catch (err) {
                     const msg = err instanceof Error ? err.message : String(err)
                     console.log(`  ${color}[researcher:WebFetch   ◀]${R} ${D}failed: ${msg}${R}`)
@@ -121,11 +132,3 @@ export function buildSynthesizerTools(agent: AgentName, color: string, runtime: 
     }
 }
 
-function extractText(html: string): string {
-    return html
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[\s\S]*?<\/style>/gi, '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s{2,}/g, ' ')
-        .trim()
-}

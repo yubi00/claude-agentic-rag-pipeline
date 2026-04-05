@@ -11,6 +11,20 @@ The current architecture is code-controlled, not prompt-controlled. The runtime 
 
 ---
 
+## Runner implementations
+
+The pipeline is provider-agnostic. The orchestrator only sees `IAgentRunner` — it has no knowledge of which SDK or model is in use.
+
+| Runner | SDK | Models | Doc |
+|--------|-----|--------|-----|
+| `ClaudeAgentRunner` | Claude Agent SDK | Claude (Haiku, Sonnet, Opus) | [docs/runner-claude.md](docs/runner-claude.md) |
+| `VercelAgentRunner` | Vercel AI SDK | Gemini via `@ai-sdk/google` | [docs/runner-vercel.md](docs/runner-vercel.md) |
+| `LangChainRunner` | LangChain.js | Any (OpenAI, Gemini, Mistral…) | _planned_ |
+
+Adding a new runner means implementing `IAgentRunner` only — the orchestrator, RAG store, and agent prompts are unchanged.
+
+---
+
 ## Table of Contents
 
 1. [System Overview](#system-overview)
@@ -293,7 +307,7 @@ Claude provider:
 - `ANTHROPIC_API_KEY`
 
 Vercel/Gemini provider:
-- `GEMINI_MODEL` — defaults to `gemini-2.0-flash`
+- `GEMINI_MODEL` — defaults to `gemini-2.5-flash`
 - `GOOGLE_GENERATIVE_AI_API_KEY`
 - `TAVILY_API_KEY`
 
