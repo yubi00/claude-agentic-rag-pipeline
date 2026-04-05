@@ -27,7 +27,7 @@ export class VercelAgentRunner implements IAgentRunner {
         const startedAt = Date.now()
         const maxSteps = agent === 'synthesizer' ? 16 : 12
         const researcherCtx = agent === 'researcher' ? buildResearcherTools(color, budget, runtime.ragStore) : null
-        const tools = researcherCtx?.tools ?? buildSynthesizerTools(agent, color, runtime)
+        const tools = researcherCtx?.tools ?? buildSynthesizerTools(agent, runtime)
 
         const budgetStop = researcherCtx
             ? (_opts: { steps: unknown[] }) => researcherCtx.isBudgetExhausted()
@@ -65,6 +65,7 @@ export class VercelAgentRunner implements IAgentRunner {
             costUsd,
             durationMs: Date.now() - startedAt,
             failedUrls: researcherCtx?.failedUrls,
+            indexedCount: researcherCtx?.getIndexedCount(),
         }
     }
 }

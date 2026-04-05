@@ -32,25 +32,42 @@ agentInstance.generate({ prompt })
   - stops when stepCount or budgetStop condition is met
   |
   v
-returns AgentRunResult { text, turns, costUsd, durationMs, failedUrls }
+returns AgentRunResult { text, turns, costUsd, durationMs, failedUrls, indexedCount }
 ```
 
 ---
 
 ## Tools
 
-### Researcher tools (`src/orchestrator/runner/vercelTools.ts`)
+### Tool file structure
+
+```
+src/
+├── tools/
+│   └── webTools.ts                        ← SDK-agnostic: tavilySearch, jinaFetch, formatSearchResults
+└── orchestrator/runner/
+    ├── vercelTools.ts                     ← wiring only: builds tool sets from factories
+    └── tools/
+        ├── webSearchTool.ts               ← Vercel tool wrapper for WebSearch
+        ├── webFetchTool.ts                ← Vercel tool wrapper for WebFetch
+        └── searchDocumentsTool.ts         ← Vercel tool wrapper for search_documents
+```
+
+`src/tools/webTools.ts` is SDK-agnostic — importable by any future runner (LangChain, etc).
+
+### Researcher tools
 
 All tools are custom — no platform-native equivalents available.
 
-**WebSearch**
-- Calls the Tavily API (`https://api.tavily.com/search`)
+**WebSearch** (`src/orchestrator/runner/tools/webSearchTool.ts`)
+- Calls `tavilySearch()` from `src/tools/webTools.ts`
 - Returns up to 5 results: URL, title, snippet
+- **Indexes snippets directly into RAG store** for factual queries that don't need full page fetch
 - Budget-tracked via shared `usage.searches` counter
 - Requires `TAVILY_API_KEY`
 
-**WebFetch**
-- Fetches via Jina Reader (`https://r.jina.ai/<url>`)
+**WebFetch** (`src/orchestrator/runner/tools/webFetchTool.ts`)
+- Calls `jinaFetch()` from `src/tools/webTools.ts`
 - Jina renders JS-heavy pages server-side and returns clean markdown
 - Budget-tracked via shared `usage.fetches` counter
 - **Indexes directly into RAG store** on successful fetch — no model extraction needed
@@ -58,13 +75,15 @@ All tools are custom — no platform-native equivalents available.
 
 **Budget enforcement (hard stop)**
 
-A shared `usage` object is mutated by both tools. `isBudgetExhausted()` returns true when both search and fetch budgets are fully spent. This is passed as a custom `stopWhen` condition alongside `stepCountIs(maxSteps)` — the loop halts at the framework level, not by relying on the model to stop after "budget exhausted" messages.
+A shared `usage` object (`{ searches, fetches, indexed }`) is mutated by both tools:
+- `isBudgetExhausted()` — stops the agent loop when both budgets are spent
+- `getIndexedCount()` — returned to orchestrator so it knows whether to run synthesizer
 
 ```typescript
 stopWhen: [stepCountIs(maxSteps), (_opts) => researcherCtx.isBudgetExhausted()]
 ```
 
-### Synthesizer tools (`src/orchestrator/runner/vercelTools.ts`)
+### Synthesizer tools (`src/orchestrator/runner/tools/searchDocumentsTool.ts`)
 
 **search_documents**
 - Calls `ragStore.searchDocuments(query, max_results)` directly

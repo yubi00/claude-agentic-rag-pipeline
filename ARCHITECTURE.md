@@ -84,7 +84,12 @@ claude-agentinc-rag/
 │   │   ├── runner/
 │   │   │   ├── interface.ts        # IAgentRunner contract
 │   │   │   ├── claudeAgentRunner.ts # Claude Agent SDK implementation
-│   │   │   └── vercelAgentRunner.ts # Vercel AI SDK + Gemini implementation
+│   │   │   ├── vercelAgentRunner.ts # Vercel AI SDK + Gemini implementation
+│   │   │   ├── vercelTools.ts      # Tool set wiring (researcher + synthesizer)
+│   │   │   └── tools/
+│   │   │       ├── webSearchTool.ts      # Vercel WebSearch tool
+│   │   │       ├── webFetchTool.ts       # Vercel WebFetch tool
+│   │   │       └── searchDocumentsTool.ts # Vercel search_documents tool
 │   │   ├── planner.ts              # Query planning and stop policy
 │   │   ├── presenter.ts            # Terminal rendering
 │   │   ├── researchOutput.ts       # SOURCE parsing, dedupe, and RAG indexing
@@ -99,6 +104,8 @@ claude-agentinc-rag/
 │   │   ├── minisearch-store.ts     # alternative in-process store
 │   │   ├── vector-store.ts         # alternative in-memory vector store
 │   │   └── tools/                  # MCP tool implementations
+│   ├── tools/
+│   │   └── webTools.ts             # SDK-agnostic: tavilySearch, jinaFetch (shared across runners)
 │   ├── libs/
 │   │   ├── agentFormatters.ts      # agent-specific text formatting
 │   │   ├── ansi.ts                 # color helpers

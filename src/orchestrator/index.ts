@@ -58,7 +58,7 @@ export async function runResearchSession(
             console.log(`  ${D}[researcher:dedupe] removed ${dedupedResearch.removedCount} previously covered source(s)${R}`)
         }
 
-        const sourceCount = extractSourceUrls(dedupedResearch.text).length
+        const sourceCount = researcher.indexedCount ?? extractSourceUrls(dedupedResearch.text).length
         if (sourceCount === 0) {
             const previousMissingTopics: string[] = finalConfidence ? finalConfidence.missingTopics : []
             finalConfidence = {
