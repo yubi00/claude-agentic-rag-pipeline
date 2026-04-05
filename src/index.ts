@@ -12,6 +12,7 @@ import { runResearchSession } from './orchestrator/index.js'
 import { ClaudeAgentRunner } from './orchestrator/runner/claudeAgentRunner.js'
 import { VercelAgentRunner } from './orchestrator/runner/vercelAgentRunner.js'
 import { LangChainAgentRunner } from './orchestrator/runner/langchainAgentRunner.js'
+import { StrandsAgentRunner } from './orchestrator/runner/strandsAgentRunner.js'
 import { initializeRagRuntime } from './rag/index.js'
 import { AGENT_PROVIDER, DEFAULT_DEEP_RESEARCH, validateEnv } from './config/env.js'
 import { RE, R } from './libs/ansi.js'
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   const runner =
     AGENT_PROVIDER === 'vercel' ? new VercelAgentRunner() :
     AGENT_PROVIDER === 'langchain' ? new LangChainAgentRunner() :
+    AGENT_PROVIDER === 'strands' ? new StrandsAgentRunner() :
     new ClaudeAgentRunner()
   await runResearchSession(question, runtime, runner, { deepResearch: DEFAULT_DEEP_RESEARCH })
 }

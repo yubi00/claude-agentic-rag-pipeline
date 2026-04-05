@@ -20,6 +20,7 @@ export const AGENT_PROVIDER = optional('AGENT_PROVIDER', 'vercel')
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
 export const GOOGLE_GENERATIVE_AI_API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY
 export const TAVILY_API_KEY = process.env.TAVILY_API_KEY
+export const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 export const DATABASE_URL = process.env.DATABASE_URL
 
 /**
@@ -34,11 +35,15 @@ export function validateEnv(): void {
     } else if (AGENT_PROVIDER === 'vercel' || AGENT_PROVIDER === 'langchain') {
         required('GOOGLE_GENERATIVE_AI_API_KEY')
         required('TAVILY_API_KEY')
+    } else if (AGENT_PROVIDER === 'strands') {
+        required('OPENAI_API_KEY')
+        required('TAVILY_API_KEY')
     }
 }
 
 // --- Models ---
 export const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
+export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini'
 export const DEFAULT_AGENT_MODEL = process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001'
 export const RESEARCHER_MODEL = process.env.RESEARCHER_MODEL ?? DEFAULT_AGENT_MODEL
 export const SYNTHESIZER_MODEL = process.env.SYNTHESIZER_MODEL ?? DEFAULT_AGENT_MODEL
