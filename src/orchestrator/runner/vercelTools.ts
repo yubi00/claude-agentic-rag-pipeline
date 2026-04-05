@@ -6,16 +6,27 @@ import type { AgentName, ResearchBudget, ResearchRuntime } from '../types.js'
 export interface ResearcherToolContext {
     tools: ReturnType<typeof buildResearcherToolset>
     failedUrls: Set<string>
+    isBudgetExhausted: () => boolean
 }
 
 export function buildResearcherTools(color: string, budget?: ResearchBudget): ResearcherToolContext {
     const failedUrls = new Set<string>()
-    return { tools: buildResearcherToolset(color, budget, failedUrls), failedUrls }
+    const usage = { searches: 0, fetches: 0 }
+    const maxSearches = budget?.maxSearchesTotal ?? Infinity
+    const maxFetches = budget?.maxFetchesTotal ?? Infinity
+    return {
+        tools: buildResearcherToolset(color, budget, failedUrls, usage),
+        failedUrls,
+        isBudgetExhausted: () => usage.searches >= maxSearches && usage.fetches >= maxFetches,
+    }
 }
 
-function buildResearcherToolset(color: string, budget: ResearchBudget | undefined, failedUrls: Set<string>) {
-    let searchesUsed = 0
-    let fetchesUsed = 0
+function buildResearcherToolset(
+    color: string,
+    budget: ResearchBudget | undefined,
+    failedUrls: Set<string>,
+    usage: { searches: number; fetches: number }
+) {
     const maxSearches = budget?.maxSearchesTotal ?? Infinity
     const maxFetches = budget?.maxFetchesTotal ?? Infinity
 
@@ -24,8 +35,8 @@ function buildResearcherToolset(color: string, budget: ResearchBudget | undefine
             description: 'Search the web for information relevant to the research task.',
             inputSchema: z.object({ query: z.string().describe('The search query') }),
             execute: async ({ query }) => {
-                if (searchesUsed >= maxSearches) return 'Search budget exhausted.'
-                searchesUsed++
+                if (usage.searches >= maxSearches) return 'Search budget exhausted.'
+                usage.searches++
 
                 console.log(`  ${color}[researcher:WebSearch  ▶]${R} ${D}${query.slice(0, 140)}${R}`)
 
@@ -51,8 +62,8 @@ function buildResearcherToolset(color: string, budget: ResearchBudget | undefine
             description: 'Fetch the full text content of a web page.',
             inputSchema: z.object({ url: z.string().describe('The URL to fetch') }),
             execute: async ({ url }) => {
-                if (fetchesUsed >= maxFetches) return 'Fetch budget exhausted.'
-                fetchesUsed++
+                if (usage.fetches >= maxFetches) return 'Fetch budget exhausted.'
+                usage.fetches++
 
                 console.log(`  ${color}[researcher:WebFetch   ▶]${R} ${D}${url.slice(0, 160)}${R}`)
                 console.log(`  ${D}[researcher] fetching page, this may take a moment...${R}`)
@@ -85,6 +96,10 @@ function buildResearcherToolset(color: string, budget: ResearchBudget | undefine
 }
 
 export function buildSynthesizerTools(agent: AgentName, color: string, runtime: ResearchRuntime) {
+    // Mutex to serialise parallel search_documents calls — Gemini fires them concurrently
+    // but sequential execution is required for the ReAct observe-then-decide loop.
+    let searchQueue = Promise.resolve()
+
     return {
         search_documents: tool<{ query: string; max_results?: number }, object>({
             description: 'Search the indexed knowledge base for relevant documents.',
@@ -92,10 +107,14 @@ export function buildSynthesizerTools(agent: AgentName, color: string, runtime: 
                 query: z.string().describe('The search query'),
                 max_results: z.number().optional().describe('Maximum number of results (default 5)'),
             }),
-            execute: async ({ query, max_results = 5 }) => {
-                console.log(`  ${AGENT_COLORS[agent]}[${agent}:RAG:search_documents ▶]${R} ${D}${query.slice(0, 140)}${R}`)
-                const result = await runtime.ragStore.searchDocuments(query, max_results)
-                console.log(`  ${AGENT_COLORS[agent]}[${agent}:RAG:search_documents ◀]${R} ${D}${result.resultCount} result(s)${R}`)
+            execute: ({ query, max_results = 5 }) => {
+                const result = searchQueue.then(async () => {
+                    console.log(`  ${AGENT_COLORS[agent]}[${agent}:RAG:search_documents ▶]${R} ${D}${query.slice(0, 140)}${R}`)
+                    const res = await runtime.ragStore.searchDocuments(query, max_results)
+                    console.log(`  ${AGENT_COLORS[agent]}[${agent}:RAG:search_documents ◀]${R} ${D}${res.resultCount} result(s)${R}`)
+                    return res
+                })
+                searchQueue = result.then(() => { }, () => { })
                 return result
             },
         }),

@@ -29,11 +29,15 @@ export class VercelAgentRunner implements IAgentRunner {
         const researcherCtx = agent === 'researcher' ? buildResearcherTools(color, budget) : null
         const tools = researcherCtx?.tools ?? buildSynthesizerTools(agent, color, runtime)
 
+        const budgetStop = researcherCtx
+            ? (_opts: { steps: unknown[] }) => researcherCtx.isBudgetExhausted()
+            : null
+
         const agentInstance = new ToolLoopAgent({
             model: google(GEMINI_MODEL),
             instructions: getAgentPrompt(agent),
             tools,
-            stopWhen: stepCountIs(maxSteps),
+            stopWhen: budgetStop ? [stepCountIs(maxSteps), budgetStop] : stepCountIs(maxSteps),
             onStepFinish: (step) => {
                 const called = step.toolCalls.map(tc => tc.toolName).join(', ')
                 if (called) console.log(`  ${D}[${agent}:step ${step.stepNumber + 1}] tools: ${called}${R}`)

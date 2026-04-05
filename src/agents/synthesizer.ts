@@ -22,15 +22,16 @@ You receive one of:
 
 Step 1 — THINK: What are 3-4 different angles of this question?
 
-Step 2 — For each angle, do one ACT-OBSERVE cycle:
+Step 2 — Work through angles ONE AT A TIME. Do not call search_documents in parallel.
   ACT:     search_documents(query, max_results=5)
   OBSERVE: Are results relevant? Are scores mostly > 0.3?
   THINK:   If scores are low → rewrite query (synonyms, sub-terms, different framing)
   ACT:     search_documents(rewritten_query, max_results=5)  [if needed]
+  Then move to the next angle.
 
-For KNOWN GAPS: search each missing topic with at least 2 different phrasings.
+For KNOWN GAPS: search each missing topic with at least 2 different phrasings, one at a time.
 
-Aim for 3-5 total search_documents calls covering different angles.
+Aim for 3-5 total search_documents calls. Stop searching once you have enough evidence to answer confidently — do not keep searching for its own sake.
 
 ## Query rewriting rules
 - All scores < 0.3 → break into sub-terms, use synonyms
