@@ -26,6 +26,7 @@ import type { IRagStore } from './interface.js'
 import { createLocalEmbedder } from './vector-store.js'
 import { createRagServer } from './server.js'
 import { InitError } from './errors.js'
+import { DATABASE_URL } from '../config/env.js'
 
 export interface RagRuntime {
   ragStore: IRagStore
@@ -33,13 +34,8 @@ export interface RagRuntime {
 }
 
 export async function initializeRagRuntime(): Promise<RagRuntime> {
-  const connectionString = process.env.DATABASE_URL
-  if (!connectionString) {
-    throw new InitError('DATABASE_URL environment variable is not set')
-  }
-
   const embedFn = await createLocalEmbedder()
-  const store = new NeonVectorStore(connectionString, embedFn)
+  const store = new NeonVectorStore(DATABASE_URL!, embedFn)
   await store.initialize()
 
   return {

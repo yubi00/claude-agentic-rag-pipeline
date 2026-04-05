@@ -19,7 +19,7 @@ The pipeline is provider-agnostic. The orchestrator only sees `IAgentRunner` —
 |--------|-----|--------|-----|
 | `ClaudeAgentRunner` | Claude Agent SDK | Claude (Haiku, Sonnet, Opus) | [docs/runner-claude.md](docs/runner-claude.md) |
 | `VercelAgentRunner` | Vercel AI SDK | Gemini via `@ai-sdk/google` | [docs/runner-vercel.md](docs/runner-vercel.md) |
-| `LangChainRunner` | LangChain.js | Any (OpenAI, Gemini, Mistral…) | _planned_ |
+| `LangChainRunner` | LangChain.js | Any (OpenAI, Gemini, Mistral…) | [docs/runner-langchain.md](docs/runner-langchain.md) |
 
 Adding a new runner means implementing `IAgentRunner` only — the orchestrator, RAG store, and agent prompts are unchanged.
 

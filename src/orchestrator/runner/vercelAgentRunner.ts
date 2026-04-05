@@ -8,7 +8,7 @@ import { buildResearcherTools, buildSynthesizerTools } from './vercelTools.js'
 import type { AgentName, AgentRunResult, ResearchBudget, ResearchRuntime } from '../types.js'
 import type { IAgentRunner } from './interface.js'
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
+import { GEMINI_MODEL } from '../../config/env.js'
 
 // Gemini Flash 2.5 pricing (per 1M tokens)
 const INPUT_COST_PER_M = 0.10

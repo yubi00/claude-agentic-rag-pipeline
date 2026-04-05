@@ -1,3 +1,5 @@
+import { TAVILY_API_KEY } from '../config/env.js'
+
 /**
  * Core web tool implementations — no SDK dependencies.
  *
@@ -23,13 +25,10 @@ export interface FetchResult {
  * Requires TAVILY_API_KEY in environment.
  */
 export async function tavilySearch(query: string, maxResults = 5): Promise<SearchResult[]> {
-    const apiKey = process.env.TAVILY_API_KEY
-    if (!apiKey) throw new Error('TAVILY_API_KEY is not set')
-
     const res = await fetch('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: apiKey, query, max_results: maxResults }),
+        body: JSON.stringify({ api_key: TAVILY_API_KEY, query, max_results: maxResults }),
     })
 
     const data = await res.json() as { results: Array<{ url: string; title: string; content: string }> }

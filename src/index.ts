@@ -11,7 +11,10 @@
 import { runResearchSession } from './orchestrator/index.js'
 import { ClaudeAgentRunner } from './orchestrator/runner/claudeAgentRunner.js'
 import { VercelAgentRunner } from './orchestrator/runner/vercelAgentRunner.js'
+import { LangChainAgentRunner } from './orchestrator/runner/langchainAgentRunner.js'
 import { initializeRagRuntime } from './rag/index.js'
+import { AGENT_PROVIDER, DEFAULT_DEEP_RESEARCH, validateEnv } from './config/env.js'
+import { RE, R } from './libs/ansi.js'
 
 async function main(): Promise<void> {
   const question = process.argv.slice(2).join(' ').trim()
@@ -22,20 +25,22 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const deepResearch = process.env.DEEP_RESEARCH === 'true'
+  validateEnv()
 
   console.log(`\nResearching: "${question}"\n`)
-  console.log(`Mode: deepResearch=${deepResearch}\n`)
-
-  const agentProvider = process.env.AGENT_PROVIDER || 'vercel'
-  console.log(`Using agent provider: ${agentProvider}\n`)
+  console.log(`Mode: deepResearch=${DEFAULT_DEEP_RESEARCH}\n`)
+  console.log(`Using agent provider: ${AGENT_PROVIDER}\n`)
 
   const runtime = await initializeRagRuntime()
-  const runner = agentProvider === 'vercel' ? new VercelAgentRunner() : new ClaudeAgentRunner()
-  await runResearchSession(question, runtime, runner, { deepResearch })
+  const runner =
+    AGENT_PROVIDER === 'vercel' ? new VercelAgentRunner() :
+    AGENT_PROVIDER === 'langchain' ? new LangChainAgentRunner() :
+    new ClaudeAgentRunner()
+  await runResearchSession(question, runtime, runner, { deepResearch: DEFAULT_DEEP_RESEARCH })
 }
 
 main().catch(err => {
-  console.error('\nFatal error:', err)
+  const msg = err instanceof Error ? err.message : String(err)
+  console.error(`\n${RE}[ERROR]${R} ${msg}`)
   process.exit(1)
 })

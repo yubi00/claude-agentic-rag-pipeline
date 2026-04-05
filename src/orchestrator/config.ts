@@ -1,19 +1,33 @@
 import { researcherDef } from '../agents/researcher.js'
 import { synthesizerDef } from '../agents/synthesizer.js'
+import {
+    DEFAULT_AGENT_MODEL,
+    RESEARCHER_MODEL,
+    SYNTHESIZER_MODEL,
+    MAX_ITERATIONS,
+    CLEAR_RAG_ON_START,
+    DEFAULT_DEEP_RESEARCH,
+    INITIAL_FETCH_BUDGET,
+    GAP_FETCH_BUDGET,
+    INITIAL_SEARCH_BUDGET,
+    GAP_SEARCH_BUDGET,
+} from '../config/env.js'
 import type { AgentName } from './types.js'
 
-export const MAX_ITERATIONS = Number(process.env.MAX_RESEARCH_ITERATIONS ?? 3)
-export const CLEAR_RAG_ON_START = process.env.CLEAR_RAG_ON_START !== 'false'
-export const DEFAULT_AGENT_MODEL = process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001'
-export const INITIAL_FETCH_BUDGET = Number(process.env.INITIAL_WEB_FETCHES ?? 5)
-export const GAP_FETCH_BUDGET = Number(process.env.GAP_WEB_FETCHES ?? 3)
-export const INITIAL_SEARCH_BUDGET = Number(process.env.INITIAL_WEB_SEARCHES ?? 5)
-export const GAP_SEARCH_BUDGET = Number(process.env.GAP_WEB_SEARCHES ?? 3)
-export const DEFAULT_DEEP_RESEARCH = process.env.DEEP_RESEARCH === 'true'
+export {
+    MAX_ITERATIONS,
+    CLEAR_RAG_ON_START,
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_DEEP_RESEARCH,
+    INITIAL_FETCH_BUDGET,
+    GAP_FETCH_BUDGET,
+    INITIAL_SEARCH_BUDGET,
+    GAP_SEARCH_BUDGET,
+}
 
 export const AGENT_MODELS: Record<AgentName, string> = {
-    researcher: process.env.RESEARCHER_MODEL ?? DEFAULT_AGENT_MODEL,
-    synthesizer: process.env.SYNTHESIZER_MODEL ?? DEFAULT_AGENT_MODEL,
+    researcher: RESEARCHER_MODEL,
+    synthesizer: SYNTHESIZER_MODEL,
 }
 
 export const AGENT_TOOLSETS: Record<AgentName, string[]> = {

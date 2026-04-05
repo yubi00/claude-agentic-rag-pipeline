@@ -11,12 +11,13 @@
  */
 
 import pino from 'pino'
+import { LOG_LEVEL, NODE_ENV } from '../config/env.js'
 
-const isProd = process.env.NODE_ENV === 'production'
+const isProd = NODE_ENV === 'production'
 
 export const logger = pino(
   {
-    level: process.env.LOG_LEVEL ?? 'info',
+    level: LOG_LEVEL,
     base: { service: 'claude-agentinc-rag' },
     timestamp: pino.stdTimeFunctions.isoTime,
   },
