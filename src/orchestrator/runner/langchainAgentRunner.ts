@@ -1,6 +1,5 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai'
-import { createReactAgent } from '@langchain/langgraph/prebuilt'
-import { HumanMessage } from '@langchain/core/messages'
+import { createAgent } from 'langchain'
 import { AGENT_COLORS, B, D, R, RE } from '../../libs/ansi.js'
 import { getAgentPrompt } from '../config.js'
 import { renderAgentStart } from '../presenter.js'
@@ -54,10 +53,10 @@ export class LangChainAgentRunner implements IAgentRunner {
         const systemPrompt = getAgentPrompt(agent)
 
         try {
-            const agentInstance = createReactAgent({
-                llm: model,
+            const agentInstance = createAgent({
+                model,
                 tools,
-                prompt: systemPrompt,
+                systemPrompt,
             })
 
             let steps = 0
@@ -72,7 +71,7 @@ export class LangChainAgentRunner implements IAgentRunner {
                 : prompt
 
             const result = await agentInstance.invoke(
-                { messages: [new HumanMessage(humanContent)] },
+                { messages: [{ role: 'user', content: humanContent }] },
                 {
                     recursionLimit: maxSteps * 2,
                     callbacks: [{
