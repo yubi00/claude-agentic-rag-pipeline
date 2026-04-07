@@ -39,6 +39,7 @@ Set `AGENT_PROVIDER=claude|vercel|langchain|strands` to select the active runner
 7. [Key Configuration](#key-configuration)
 8. [Key Architectural Decisions](#key-architectural-decisions)
 9. [Prompt Caching](#prompt-caching)
+10. [Agent Memory](#agent-memory)
 
 ---
 
@@ -479,3 +480,116 @@ Prompt caching becomes worthwhile when:
 - **Track cache hit rate** — `cache_read_input_tokens / total_input_tokens` should be > 80% on repeated agent calls. Lower means prompts are varying too much between calls
 - **Warm the cache proactively** — on cold start, fire a cheap dummy request to prime the cache before real traffic hits the 5-minute (Anthropic) or 1-hour (OpenAI) window
 - **Cache the growing conversation history** — in multi-turn agents, mark the previous conversation as cacheable each turn so you only pay full price for the new turn
+
+---
+
+## Agent Memory
+
+Memory lets agents carry knowledge forward across sessions. Without it, every session starts completely blind — the same URLs get fetched, the same pages indexed, the same tokens spent, even for questions that were answered yesterday.
+
+### The four types
+
+**1. In-context memory** — the conversation history within a single agent invocation. Tool results and model responses accumulated in the context window. This is what we have now. Lasts for one `runner.run()` call, managed automatically by the framework (LangGraph, Strands loop, etc.). Disappears when the call returns.
+
+**2. Semantic memory (RAG)** — indexed facts retrieved by similarity search. Our `NeonVectorStore` *is* semantic memory — but we wipe it on every session (`CLEAR_RAG_ON_START=true`). Setting `CLEAR_RAG_ON_START=false` immediately turns it into persistent semantic memory. Risk: stale content grows unboundedly without a TTL policy.
+
+**3. Episodic memory** — records of past sessions: what question was asked, what answer was produced, which sources were used, what confidence was reached. Lets the orchestrator recognise a repeated or similar question and return a cached answer rather than re-running the full pipeline.
+
+**4. Procedural memory** — learned strategies: which query patterns work, which sources are high quality, which URLs consistently fail. In practice this is baked into the system prompt rather than implemented as a runtime store.
+
+### How they map to this architecture
+
+```
+Type 1 — In-context       Already implemented. Lives inside runner.run().
+
+Type 2 — Semantic / RAG   Infrastructure exists (NeonVectorStore).
+                          Persistent with CLEAR_RAG_ON_START=false.
+                          Needs TTL pruning to stay fresh.
+
+Type 3 — Episodic         Not implemented. Would be a sessions table in Neon.
+                          Orchestrator checks before running the pipeline.
+                          Cache hit → return stored answer or skip researcher.
+
+Type 4 — Procedural       Not worth implementing. Lives in system prompts.
+```
+
+### Proposed design (not yet implemented)
+
+**Persistent RAG** — already half-done, just an env var:
+
+```
+CLEAR_RAG_ON_START=false    # keep existing docs between sessions
+RAG_TTL_DAYS=7              # prune docs older than N days on startup
+```
+
+**Episodic session memory** — new `sessions` table in Neon (same DB):
+
+```sql
+CREATE TABLE sessions (
+  id          SERIAL PRIMARY KEY,
+  question    TEXT NOT NULL,
+  embedding   vector(384),          -- for similarity lookup
+  answer      TEXT NOT NULL,
+  confidence  VARCHAR(10),
+  sources     JSONB,
+  cost_usd    FLOAT,
+  iterations  INT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Orchestrator flow with memory enabled:
+
+```text
+runResearchSession(question)
+  ↓
+memoryStore.findSimilar(question, threshold=0.85)
+  → HIGH confidence hit < 24h old  → return cached answer immediately
+  → MEDIUM confidence hit < 1h old → skip researcher, run synthesizer only
+  → miss                           → run full pipeline
+  ↓
+[pipeline runs normally]
+  ↓
+memoryStore.save({ question, answer, confidence, sources, cost, iterations })
+```
+
+The similarity check reuses the same local embedder already running in-process — embed the new question, cosine similarity against stored question embeddings. No extra infrastructure needed.
+
+**Planned module structure:**
+
+```
+src/
+└── memory/
+    ├── interface.ts      ← IMemoryStore
+    ├── neon-memory.ts    ← Neon-backed sessions table
+    └── index.ts          ← initializeMemory()
+```
+
+**Planned env vars:**
+
+```
+MEMORY_ENABLED=false               # episodic memory on/off
+MEMORY_TTL_HOURS=24                # how long before a cached answer is stale
+MEMORY_SIMILARITY_THRESHOLD=0.85   # cosine sim to consider questions "the same"
+RAG_TTL_DAYS=7                     # prune stale RAG docs on startup (persistent RAG)
+```
+
+### Why it's not implemented yet
+
+This is a single-user CLI research tool. Memory compounds in value when:
+
+- Many users ask overlapping questions (chatbot, search product)
+- A user has multi-turn conversations referencing earlier context
+- A long-running agent needs to recall what it did hours or days ago
+- A tool monitors the same topics across multiple sessions (competitive intelligence, weekly briefings)
+
+None of those apply here. For this boilerplate, `CLEAR_RAG_ON_START` is the one practical lever — persistent RAG across sessions is free with an env var change.
+
+### When to implement
+
+Implement episodic memory when moving to a domain-specific deployment where:
+
+1. **The question space is bounded** — a customer support agent, a product FAQ bot, a domain researcher. Unbounded question spaces (any question about anything) have low cache hit rates.
+2. **Repeated questions are likely** — same user returning, or many users in the same domain asking similar things.
+3. **Freshness requirements are clear** — you can define confidently when an answer is "stale" (a restaurant list from 6 months ago is stale; a legal principle from 5 years ago may not be).
+4. **The answer quality justifies caching** — only cache HIGH or MEDIUM confidence answers. LOW confidence answers should always trigger a fresh pipeline run.
