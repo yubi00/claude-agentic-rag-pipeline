@@ -1,4 +1,4 @@
-# claude-agentinc-rag
+# agentic-rag
 
 Provider-agnostic multi-agent RAG pipeline — swap between Claude, Gemini, and OpenAI runners to compare agentic frameworks (Claude Agent SDK, Vercel AI SDK, LangChain, Strands) with deterministic orchestration, web research, and confidence-based synthesis.
 
