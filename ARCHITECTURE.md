@@ -2,12 +2,12 @@
 
 Agentic RAG research pipeline with a provider-agnostic agent runner interface.
 
-The current architecture is code-controlled, not prompt-controlled. The runtime executes a deterministic sequence:
+The architecture is **code-controlled, not prompt-controlled**. The runtime executes a deterministic sequence:
 
-1. `researcher` gathers web evidence
-2. orchestrator parses SOURCE blocks and writes directly to the RAG store (no LLM)
-3. `synthesizer` answers from indexed knowledge only
-4. the orchestrator parses confidence and decides whether to stop or run another research pass
+1. `researcher` gathers web evidence and indexes directly into the RAG store (via tools, no model extraction)
+2. orchestrator parses SOURCE markers for deduplication and decides whether to run the synthesizer
+3. `synthesizer` answers from indexed knowledge only via vector search
+4. orchestrator parses the confidence block and decides whether to stop or run another research pass
 
 ---
 
@@ -15,13 +15,16 @@ The current architecture is code-controlled, not prompt-controlled. The runtime 
 
 The pipeline is provider-agnostic. The orchestrator only sees `IAgentRunner` — it has no knowledge of which SDK or model is in use.
 
-| Runner | SDK | Models | Doc |
-|--------|-----|--------|-----|
-| `ClaudeAgentRunner` | Claude Agent SDK | Claude (Haiku, Sonnet, Opus) | [docs/runner-claude.md](docs/runner-claude.md) |
-| `VercelAgentRunner` | Vercel AI SDK | Gemini via `@ai-sdk/google` | [docs/runner-vercel.md](docs/runner-vercel.md) |
-| `LangChainRunner` | LangChain.js | Any (OpenAI, Gemini, Mistral…) | [docs/runner-langchain.md](docs/runner-langchain.md) |
+| Runner | SDK | Model | Doc |
+|--------|-----|-------|-----|
+| `ClaudeAgentRunner` | Claude Agent SDK | Claude Haiku / Sonnet / Opus | [docs/runner-claude.md](docs/runner-claude.md) |
+| `VercelAgentRunner` | Vercel AI SDK | Gemini 2.5 Flash | [docs/runner-vercel.md](docs/runner-vercel.md) |
+| `LangChainAgentRunner` | LangChain.js + LangGraph | Gemini 2.5 Flash | [docs/runner-langchain.md](docs/runner-langchain.md) |
+| `StrandsAgentRunner` | Strands Agents (TS SDK) | gpt-4o-mini | [docs/runner-strands.md](docs/runner-strands.md) |
 
 Adding a new runner means implementing `IAgentRunner` only — the orchestrator, RAG store, and agent prompts are unchanged.
+
+Set `AGENT_PROVIDER=claude|vercel|langchain|strands` to select the active runner.
 
 ---
 
@@ -35,6 +38,7 @@ Adding a new runner means implementing `IAgentRunner` only — the orchestrator,
 6. [RAG Runtime](#rag-runtime)
 7. [Key Configuration](#key-configuration)
 8. [Key Architectural Decisions](#key-architectural-decisions)
+9. [Prompt Caching](#prompt-caching)
 
 ---
 
@@ -48,14 +52,15 @@ User
   v
 src/index.ts
   - reads CLI question
-  - validates env
+  - validates env (provider-specific keys only)
   - calls initializeRagRuntime()
-  - constructs IAgentRunner (ClaudeAgentRunner or VercelAgentRunner)
+  - constructs IAgentRunner (selected via AGENT_PROVIDER)
   - calls runResearchSession(question, runtime, runner)
   |
   v
 src/rag/index.ts
-  - creates active store
+  - creates local embedder
+  - creates NeonVectorStore (pgvector)
   - initializes store
   - creates in-process MCP server
   - returns { ragStore, ragServer }
@@ -63,8 +68,8 @@ src/rag/index.ts
   v
 src/orchestrator/index.ts
   - runs deterministic iteration loop
-  - researcher -> index (code) -> synthesizer
-  - parses confidence
+  - researcher → index (code) → synthesizer
+  - parses confidence block
   - retries only when policy says to retry
 ```
 
@@ -75,62 +80,60 @@ src/orchestrator/index.ts
 ```text
 claude-agentinc-rag/
 ├── src/
-│   ├── index.ts                    # CLI entry point
+│   ├── index.ts                         # CLI entry point
+│   ├── config/
+│   │   └── env.ts                       # Central env config — all process.env access here
 │   ├── agents/
-│   │   ├── researcher.ts           # Web evidence gathering prompt
-│   │   └── synthesizer.ts          # Retrieval + answer prompt
+│   │   ├── researcher.ts                # Web evidence gathering prompt + AgentDefinition
+│   │   └── synthesizer.ts               # Retrieval + answer prompt + AgentDefinition
 │   ├── orchestrator/
-│   │   ├── index.ts                # Session loop
-│   │   ├── runner/
-│   │   │   ├── interface.ts        # IAgentRunner contract
-│   │   │   ├── claudeAgentRunner.ts # Claude Agent SDK implementation
-│   │   │   ├── vercelAgentRunner.ts # Vercel AI SDK + Gemini implementation
-│   │   │   ├── vercelTools.ts      # Tool set wiring (researcher + synthesizer)
-│   │   │   └── tools/
-│   │   │       ├── webSearchTool.ts      # Vercel WebSearch tool
-│   │   │       ├── webFetchTool.ts       # Vercel WebFetch tool
-│   │   │       └── searchDocumentsTool.ts # Vercel search_documents tool
-│   │   ├── planner.ts              # Query planning and stop policy
-│   │   ├── presenter.ts            # Terminal rendering
-│   │   ├── researchOutput.ts       # SOURCE parsing, dedupe, and RAG indexing
-│   │   ├── config.ts               # env-backed config
-│   │   ├── limiter.ts              # Web tool budgets (Claude runner only)
-│   │   ├── toolConfig.ts           # tool allow/deny lists (Claude runner only)
-│   │   └── types.ts                # orchestrator shared types
+│   │   ├── index.ts                     # Session loop (outer orchestrator)
+│   │   ├── config.ts                    # Agent model + toolset config
+│   │   ├── planner.ts                   # Research task builder and stop policy
+│   │   ├── presenter.ts                 # Terminal rendering
+│   │   ├── researchOutput.ts            # SOURCE parsing, dedupe, indexing
+│   │   ├── limiter.ts                   # Web tool budget hooks (Claude runner only)
+│   │   ├── toolConfig.ts                # Tool allow/deny lists (Claude runner only)
+│   │   ├── types.ts                     # Shared orchestrator types
+│   │   └── runner/
+│   │       ├── interface.ts             # IAgentRunner contract
+│   │       ├── claudeAgentRunner.ts     # Claude Agent SDK runner
+│   │       ├── vercelAgentRunner.ts     # Vercel AI SDK + Gemini runner
+│   │       ├── vercelTools.ts           # Vercel tool set wiring
+│   │       ├── langchainAgentRunner.ts  # LangChain.js + LangGraph runner
+│   │       ├── strandsAgentRunner.ts    # Strands Agents (TS SDK) + OpenAI runner
+│   │       └── tools/
+│   │           ├── webSearchTool.ts          # Vercel: WebSearch
+│   │           ├── webFetchTool.ts           # Vercel: WebFetch
+│   │           ├── searchDocumentsTool.ts    # Vercel: search_documents (with mutex)
+│   │           ├── langchain/
+│   │           │   ├── webSearchTool.ts      # LangChain: WebSearch
+│   │           │   ├── webFetchTool.ts       # LangChain: WebFetch
+│   │           │   └── searchDocumentsTool.ts # LangChain: search_documents
+│   │           └── strands/
+│   │               ├── webSearchTool.ts      # Strands: WebSearch
+│   │               ├── webFetchTool.ts       # Strands: WebFetch
+│   │               └── searchDocumentsTool.ts # Strands: search_documents
 │   ├── rag/
-│   │   ├── index.ts                # explicit RAG runtime bootstrap
-│   │   ├── server.ts               # in-process MCP server factory
-│   │   ├── neon-store.ts           # active pgvector-backed store
-│   │   ├── minisearch-store.ts     # alternative in-process store
-│   │   ├── vector-store.ts         # alternative in-memory vector store
-│   │   └── tools/                  # MCP tool implementations
+│   │   ├── index.ts                     # RAG runtime bootstrap
+│   │   ├── server.ts                    # In-process MCP server factory
+│   │   ├── neon-store.ts                # Active pgvector-backed store
+│   │   ├── vector-store.ts              # Alternative in-memory vector store
+│   │   ├── minisearch-store.ts          # Alternative BM25 in-process store
+│   │   ├── interface.ts                 # IRagStore contract
+│   │   └── errors.ts                    # RAG-specific error types
 │   ├── tools/
-│   │   └── webTools.ts             # SDK-agnostic: tavilySearch, jinaFetch (shared across runners)
+│   │   └── webTools.ts                  # SDK-agnostic: tavilySearch, jinaFetch (shared)
 │   ├── libs/
-│   │   ├── agentFormatters.ts      # agent-specific text formatting
-│   │   ├── ansi.ts                 # color helpers
-│   │   └── logger.ts               # pino logger
+│   │   ├── ansi.ts                      # Terminal color helpers
+│   │   └── logger.ts                    # Pino structured logger
 │   └── utils/
-│       └── index.ts                # confidence parsing and text helpers
-└── package.json
-```
-
-### Dependency graph
-
-```text
-index.ts
-  ├── rag/index.ts
-  |     ├── rag/neon-store.ts
-  |     └── rag/server.ts
-  |
-  └── orchestrator/index.ts
-        ├── orchestrator/runner/interface.ts
-        ├── orchestrator/runner/claudeAgentRunner.ts
-        ├── orchestrator/runner/vercelAgentRunner.ts
-        ├── orchestrator/planner.ts
-        ├── orchestrator/presenter.ts
-        ├── orchestrator/researchOutput.ts  (includes indexResearchOutput)
-        └── agents/{researcher,synthesizer}.ts
+│       └── index.ts                     # parseConfidenceBlock, extractText helpers
+└── docs/
+    ├── runner-claude.md
+    ├── runner-vercel.md
+    ├── runner-langchain.md
+    └── runner-strands.md
 ```
 
 ---
@@ -142,79 +145,79 @@ Question
   |
   v
 initializeRagRuntime()
-  |
-  +--> ragStore  (active store implementation)
-  +--> ragServer (MCP server backed by ragStore)
+  +--> NeonVectorStore (pgvector, persistent)
+  +--> in-process MCP server (backed by ragStore)
   |
   v
-runResearchSession(question, runtime)
+runResearchSession(question, runtime, runner)
   |
   +--> optional clearDocuments()
   |
-  +--> iteration 1..N
+  +--> iteration 1..MAX_ITERATIONS
          |
-         +--> build research task
-         +--> run researcher
-         |      - WebSearch
-         |      - WebFetch
-         |      - emits SOURCE blocks
+         +--> buildResearchTask(question, iteration, previousConfidence, previouslyCovered)
          |
-         +--> dedupe SOURCE blocks against previously covered URLs
+         +--> runner.run('researcher', task, runtime, budget)
+         |      ↓ [inside runner — LangGraph / ToolLoopAgent / Strands loop]
+         |      WebSearch → tavilySearch() → index snippets into ragStore
+         |      WebFetch  → jinaFetch()   → index full page into ragStore
+         |      model emits <<<SOURCE>>> markers (URL + Title only)
+         |      returns AgentRunResult { text, indexedCount, failedUrls }
          |
-         +--> if no new SOURCE blocks:
-         |      - mark confidence low
-         |      - retry or stop
+         +--> dedupeResearchOutput() — remove previously covered SOURCE blocks
+         +--> extractSourceUrls()    — add new URLs to previouslyCovered
          |
-         +--> indexResearchOutput() [code, no LLM]
-         |      - parseSourceBlocks()
-         |      - ragStore.addDocument() per source
+         +--> if indexedCount == 0:
+         |      skip synthesizer, log warning, retry or stop
          |
-         +--> run synthesizer
-         |      - search_documents
-         |      - cited answer
-         |      - trailing JSON confidence block
+         +--> runner.run('synthesizer', prompt, runtime)
+         |      ↓ [inside runner — LangGraph / ToolLoopAgent / Strands loop]
+         |      search_documents → ragStore.searchDocuments() (vector search)
+         |      compose cited answer + trailing JSON confidence block
+         |      returns AgentRunResult { text }
          |
-         +--> parse confidence
-         +--> stop or gap-fill
+         +--> parseConfidenceBlock(text) → { confidence, missingTopics, coverageNotes }
+         +--> stripConfidenceBlock(text) → finalAnswer
+         +--> shouldStop(iteration, confidence, deepResearch) → stop or loop
+  |
+  v
+renderFinalAnswer(answer, confidence, totals, iterations)
 ```
 
 ---
 
 ## Iteration Control
 
-Iteration control is implemented in code in `src/orchestrator/index.ts`, not delegated to a free-form orchestrator prompt.
+Implemented in code in `src/orchestrator/index.ts`. Not delegated to the model.
 
 ### Stop policy
 
-Default mode:
-
-```text
-high   -> stop
-medium -> stop
-low    -> retry until max iterations
+Default mode (`DEEP_RESEARCH=false`):
+```
+high   → stop
+medium → stop
+low    → retry until MAX_ITERATIONS
 ```
 
-Deep research mode:
-
-```text
-high         -> stop
-medium / low -> retry until max iterations
+Deep research mode (`DEEP_RESEARCH=true`):
+```
+high         → stop
+medium / low → retry until MAX_ITERATIONS
 ```
 
 ### Research passes
 
-Iteration 1:
-- broad initial queries
-- higher fetch/search budget
+**Iteration 1** (initial):
+- broad queries, higher fetch/search budget (`INITIAL_WEB_FETCHES`, `INITIAL_WEB_SEARCHES`)
 
-Iteration 2+:
-- targeted gap-filling queries derived from `missingTopics`
-- smaller fetch/search budget
-- dedupe against previously covered URLs
+**Iteration 2+** (gap-filling):
+- targeted queries from `missingTopics`
+- smaller budget (`GAP_WEB_FETCHES`, `GAP_WEB_SEARCHES`)
+- deduplication against `previouslyCovered` URLs
 
 ### No-source guard
 
-If the researcher returns no new indexable `SOURCE` blocks after deduplication, the orchestrator skips indexing and synthesis for that pass and treats the iteration as low-confidence gap-filling input.
+If `indexedCount == 0` after deduplication, the orchestrator skips synthesis for that pass and treats confidence as LOW. Avoids wasting synthesizer tokens when the researcher found nothing new.
 
 ---
 
@@ -224,147 +227,255 @@ If the researcher returns no new indexable `SOURCE` blocks after deduplication, 
 
 File: `src/agents/researcher.ts`
 
-- Tools: `WebSearch`, `WebFetch`
-- Responsibility: gather external evidence and emit structured `SOURCE` blocks
-- Input: JSON task object with queries, context, gap-filling flag, previously covered URLs, and fetch budget
-- Output: source blocks plus `RESEARCH SUMMARY`
+- **Tools**: `WebSearch`, `WebFetch`
+- **Responsibility**: gather external evidence, index it into the RAG store via tools, emit `<<<SOURCE>>>` markers for deduplication tracking
+- **Input**: JSON task with queries, context, gap-filling flag, previously covered URLs, fetch budget
+- **Output**: `<<<SOURCE>>>` blocks (URL + Title only) + `RESEARCH SUMMARY`
 
-Important behavior:
-- enforces total fetch budget per task
-- preserves high-value unfetched search results when needed
-- emits event-specific `SOURCE` blocks for event-style queries when possible
-- avoids mentioning facts in summary that are not present in a `SOURCE` block
+Key behaviours:
+- Indexing happens **inside the tool**, not in the model output — content goes to RAG verbatim, model only sees `"Fetched and indexed: url"` confirmation
+- Budget enforced at framework level (`stopWhen` / hook / `recursionLimit`) — model cannot overspend
+- Deduplication via shared `indexedUrls` set prevents the same URL being indexed twice within one run
 
 ### Synthesizer
 
 File: `src/agents/synthesizer.ts`
 
-- Tools: MCP `rag` search only
-- Responsibility: answer only from indexed knowledge
-- Input: original question or `KNOWN GAPS: ...` prompt
-- Output: cited answer plus required trailing confidence JSON block
+- **Tools**: `search_documents` (RAG store only)
+- **Responsibility**: answer from indexed knowledge, no web access
+- **Input**: original question or `KNOWN GAPS: [list]\n\nQuestion: [question]`
+- **Output**: cited answer + required trailing JSON confidence block
 
-Important behavior:
-- performs multiple retrieval angles
-- rewrites queries if retrieval quality is weak
-- uses stricter confidence rules for time-sensitive queries
-- distinguishes confirmed event venue from city-level location and organizer/contact address
+Key behaviours:
+- Multiple search angles, query rewriting on weak results
+- Stricter confidence rules for time-sensitive / event-style queries
+- Confidence block parsed by orchestrator to drive iteration decisions
 
 ---
 
 ## RAG Runtime
 
-The active backend is Neon Postgres with pgvector.
+Active backend: **Neon Postgres with pgvector** (`src/rag/neon-store.ts`)
 
 ### Bootstrap
 
-File: `src/rag/index.ts`
-
 ```text
 initializeRagRuntime()
-  - validate DATABASE_URL
-  - create embedder
-  - create NeonVectorStore
-  - initialize store
-  - create in-process MCP server
-  - return { ragStore, ragServer }
+  1. createLocalEmbedder()    ← all-MiniLM-L6-v2, 384 dimensions, runs in-process
+  2. new NeonVectorStore(DATABASE_URL, embedFn)
+  3. store.initialize()       ← creates table + index if not exists
+  4. createRagServer(store)   ← in-process MCP server (Claude runner only)
+  → { ragStore, ragServer }
 ```
 
-### Active store
+### Store interface (`src/rag/interface.ts`)
 
-File: `src/rag/neon-store.ts`
+```typescript
+interface IRagStore {
+  addDocument(doc: { url, title, content }): Promise<void>
+  searchDocuments(query, maxResults): Promise<SearchResult>
+  clearDocuments(): Promise<void>
+  listDocuments(): Promise<Document[]>
+}
+```
 
-- persistent pgvector-backed semantic retrieval
-- local embeddings
-- chunk-based document indexing
-- `clearDocuments`, `addDocument`, `searchDocuments`, `listDocuments`
+### MCP server (`src/rag/server.ts`)
 
-### MCP server
+Exposed tools: `index_document`, `search_documents`, `list_indexed`, `clear_index`
 
-File: `src/rag/server.ts`
+Used by the Claude runner only — other runners inject `ragStore` directly as a closure into tool functions.
 
-Exposed tools:
-- `index_document`
-- `search_documents`
-- `list_indexed`
-- `clear_index`
+### Alternative backends
 
-The MCP server is created once per runtime and passed into subagents that need it.
+| Store | File | Use case |
+|-------|------|----------|
+| NeonVectorStore | `neon-store.ts` | Production, persistent, pgvector |
+| VectorStore | `vector-store.ts` | In-memory, no DB, local embeddings |
+| MiniSearchStore | `minisearch-store.ts` | In-process BM25, zero external deps |
+
+Switch in `src/rag/index.ts`.
 
 ---
 
 ## Key Configuration
 
-Primary session controls:
+All env vars centralised in `src/config/env.ts`. `validateEnv()` runs at startup and throws early if provider-required keys are missing.
 
-- `DEEP_RESEARCH`
-- `MAX_RESEARCH_ITERATIONS`
-- `CLEAR_RAG_ON_START`
-- `INITIAL_WEB_FETCHES`
-- `GAP_WEB_FETCHES`
-- `INITIAL_WEB_SEARCHES`
-- `GAP_WEB_SEARCHES`
+### Session controls
 
-Provider controls:
+| Var | Default | Effect |
+|-----|---------|--------|
+| `AGENT_PROVIDER` | `vercel` | Active runner: `claude`, `vercel`, `langchain`, `strands` |
+| `DEEP_RESEARCH` | `false` | If true, retries on medium confidence too |
+| `MAX_RESEARCH_ITERATIONS` | `3` | Hard cap on researcher/synthesizer cycles |
+| `CLEAR_RAG_ON_START` | `true` | Wipe RAG store before each session |
+| `INITIAL_WEB_FETCHES` | `5` | Fetch budget for iteration 1 |
+| `GAP_WEB_FETCHES` | `3` | Fetch budget for iterations 2+ |
+| `INITIAL_WEB_SEARCHES` | `5` | Search budget for iteration 1 |
+| `GAP_WEB_SEARCHES` | `3` | Search budget for iterations 2+ |
 
-- `AGENT_PROVIDER` — `claude` (default) or `vercel`
+### Provider-specific keys
 
-Claude provider:
-- `AGENT_MODEL` / `RESEARCHER_MODEL` / `SYNTHESIZER_MODEL`
-- `ANTHROPIC_API_KEY`
+| Provider | Required keys |
+|----------|--------------|
+| `claude` | `ANTHROPIC_API_KEY` |
+| `vercel` | `GOOGLE_GENERATIVE_AI_API_KEY`, `TAVILY_API_KEY` |
+| `langchain` | `GOOGLE_GENERATIVE_AI_API_KEY`, `TAVILY_API_KEY` |
+| `strands` | `OPENAI_API_KEY`, `TAVILY_API_KEY` |
+| All | `DATABASE_URL` |
 
-Vercel/Gemini provider:
-- `GEMINI_MODEL` — defaults to `gemini-2.5-flash`
-- `GOOGLE_GENERATIVE_AI_API_KEY`
-- `TAVILY_API_KEY`
+### Model overrides
 
-Infrastructure:
-
-- `DATABASE_URL`
-- `LOG_LEVEL`
+| Var | Default | Used by |
+|-----|---------|---------|
+| `GEMINI_MODEL` | `gemini-2.5-flash` | vercel, langchain |
+| `OPENAI_MODEL` | `gpt-4o-mini` | strands |
+| `AGENT_MODEL` | `claude-haiku-4-5-20251001` | claude (base) |
+| `RESEARCHER_MODEL` | `AGENT_MODEL` | claude |
+| `SYNTHESIZER_MODEL` | `AGENT_MODEL` | claude |
 
 ---
 
 ## Key Architectural Decisions
 
-### 1. Deterministic orchestration
+### 1. Code-enforced orchestration, not prompt-enforced
 
-The pipeline order is enforced in code, not left to model discretion. This reduces ambiguity and makes failures easier to diagnose.
+The researcher → synthesizer sequence and the confidence-based loop are enforced in TypeScript code, not left to the model's discretion. The model cannot skip synthesis, loop back early, or run agents out of order.
 
-### 2. Explicit runtime bootstrap
+### 2. Direct RAG indexing in tools (not post-run extraction)
 
-RAG initialization no longer happens at import time. Startup builds a runtime explicitly and injects it into the orchestrator.
+Early design had the researcher model emit full page content in `SOURCE` blocks, which the orchestrator would parse and index. This failed because:
+- The model compressed content during extraction (losing factual detail)
+- Large pages caused summarisation rather than verbatim preservation
+- The model sometimes forgot to emit SOURCE blocks
 
-### 3. Small orchestration modules
+**Fix**: content is indexed inside the tool `execute`/`callback` function immediately after `jinaFetch()` returns. The model only receives `"Fetched and indexed: url"` — it never touches the raw content.
 
-The original monolithic orchestration file was split into runner, planner, presenter, config, and research-output helpers. This keeps responsibilities narrower and easier to test.
+### 3. Provider-agnostic runner via `IAgentRunner`
 
-### 4. Retrieval-only synthesis
+The orchestrator only calls `runner.run(agent, prompt, runtime, budget)` and receives `AgentRunResult`. Four implementations exist (Claude, Vercel, LangChain, Strands) — they share no code except `src/tools/webTools.ts`.
 
-The synthesizer answers only from indexed knowledge, never directly from the web. This preserves the separation between evidence gathering and answer generation.
+### 4. SDK-agnostic web tools core
 
-### 5. Source-preserving research
+`src/tools/webTools.ts` contains the actual HTTP logic for Tavily search and Jina fetch with no framework imports. All four runners import the same functions — only the wrapper (`tool()`, `DynamicStructuredTool`, `callback`) differs per SDK.
 
-The researcher is optimized to preserve indexable evidence, not just produce a narrative summary. This matters especially for event-like and time-sensitive queries.
+### 5. Parallel tool execution needs a mutex (Vercel only)
 
-### 6. Configurable cost controls
+Gemini via Vercel's `ToolLoopAgent` fires multiple tool calls in parallel. The synthesizer's `search_documents` must be serialised to preserve the observe-then-decide reasoning loop. Fixed via a promise-chain mutex:
 
-Fetch/search budgets and iteration depth are env-driven so the same architecture can run as a cheap boilerplate or a more thorough research mode.
+```typescript
+let searchQueue = Promise.resolve()
+execute: ({ query }) => {
+    const result = searchQueue.then(() => ragStore.searchDocuments(query))
+    searchQueue = result.then(() => {}, () => {})
+    return result
+}
+```
 
-### 7. Single output path
+LangChain (ReAct sequential) and Strands (TS SDK sequential) do not need this.
 
-Terminal rendering now flows through `presenter.ts` only. Duplicate legacy renderer/logger paths were removed to avoid drift.
+### 6. Budget enforcement at framework level
 
-### 8. Code-based indexing, no indexer agent
+Relying on the model to stop after "budget exhausted" strings is unreliable. Each runner enforces the budget differently:
 
-RAG ingestion is handled by `indexResearchOutput()` in `researchOutput.ts`, not a subagent. The researcher emits structured `SOURCE` blocks; parsing and storing them is mechanical and needs no model judgment. This removes one LLM call per iteration with no loss of capability. Indexing progress is captured via structured logs (`doc.indexed` per document, `indexer.done` per iteration).
+| Runner | Mechanism |
+|--------|-----------|
+| Vercel | `stopWhen` callback — fires before next tool call |
+| LangChain | Tool returns exhaustion string + `recursionLimit` as hard cap |
+| Strands | `BeforeToolCallEvent` hook — cancels specific tools before execution |
+| Claude | `max_turns` on `query()` + `hooks` from `limiter.ts` |
 
-### 9. Provider-agnostic agent runner
+### 7. Deduplication via shared `indexedUrls` set
 
-Agent execution is abstracted behind `IAgentRunner` in `orchestrator/runner/interface.ts`. The orchestrator only calls `runner.run(agent, prompt, runtime, budget)` and receives `AgentRunResult` — it has no knowledge of which SDK or model is in use.
+A `Set<string>` is created per agent run and passed to both WebSearch and WebFetch tools. Before indexing any document, both tools check this set. This prevents:
+- The same URL appearing in multiple search queries being indexed twice
+- A URL pre-indexed as a snippet (WebSearch) being re-indexed as a full page (WebFetch)
 
-Two implementations ship out of the box:
-- `ClaudeAgentRunner` — uses the Claude Agent SDK with native `WebSearch`/`WebFetch` tools and MCP server support
-- `VercelAgentRunner` — uses Vercel AI SDK `ToolLoopAgent` with Gemini via `@ai-sdk/google`, Tavily for web search, and raw fetch for page content
+### 8. `<<<SOURCE>>>` delimiters for deduplication markers
 
-The active runner is selected at startup via `AGENT_PROVIDER` env var and injected into `runResearchSession()`. Adding a new provider means implementing `IAgentRunner` only — the rest of the pipeline is unchanged.
+Original design used `---` as SOURCE block delimiters. Jina Reader returns markdown which also uses `---` for horizontal rules, breaking the parser. Switched to `<<<SOURCE>>>` / `<<<END>>>` — characters that never appear in markdown or HTML naturally.
+
+### 9. Our orchestrator is a hand-rolled LangGraph
+
+The outer orchestration loop in `src/orchestrator/index.ts` is structurally equivalent to a `StateGraph`:
+
+- **Nodes**: researcher agent, synthesizer agent
+- **State**: `previouslyCovered`, `finalConfidence`, `indexedCount`, `iteration`
+- **Conditional edges**: `shouldStop()`, `sourceCount === 0` guard, `MAX_ITERATIONS` cap
+
+We chose plain TypeScript over `StateGraph` deliberately:
+- The `for` loop is ~100 lines and easy to read/debug
+- `IAgentRunner` gives provider-agnosticism that LangGraph's node system doesn't
+- `StateGraph` would couple the orchestrator to the LangChain ecosystem
+
+Where `StateGraph` would be worth it: if we add LangSmith observability, checkpointing/resume, or human-in-the-loop interrupts between nodes.
+
+### 10. Strands loop vs our orchestrator loop
+
+Strands' internal agent loop (model → tools → model → ... → end_turn) and our outer orchestrator loop are different levels:
+
+| | Strands internal loop | Our orchestrator loop |
+|--|--|--|
+| What drives stopping | Model emits `end_turn` | Confidence block parsed from synthesizer output |
+| Memory | Conversation history (within one agent) | RAG store (shared across agents) |
+| Loops back | No — history only moves forward | Yes — researcher reruns with gap list |
+| Scope | One agent, one task | Two agents, coordinated externally |
+
+Both are running simultaneously — Strands' loop runs *inside* each `runner.run()` call, our loop runs *between* them.
+
+---
+
+## Prompt Caching
+
+Prompt caching lets model providers reuse the processed KV state of a prompt prefix across calls, instead of recomputing it every time. Cache reads are ~10% of the cost of full input tokens.
+
+### How each provider implements it
+
+**Anthropic** — explicit opt-in via `cache_control: { type: "ephemeral" }` on message content blocks. Minimum 1024 tokens. Cached for 5 minutes (extendable). Cache read cost: ~10% of input token price. You see `cache_read_input_tokens` and `cache_creation_input_tokens` in the usage response.
+
+**OpenAI** — fully automatic. No API changes needed. Any prompt prefix > 1024 tokens is cached for 1 hour. Cache hits appear as `cached_tokens` in the usage response. With the Strands runner using gpt-4o-mini, this is already active if prompts exceed the threshold.
+
+**Google Gemini** — explicit `GoogleAICacheManager.create()` API call to upload content to Google's servers. Minimum **32,768 tokens** — a much higher threshold. Referenced by ID on subsequent calls via `model.useCachedContent(cachedContent)`. Designed for large static corpora, not system prompts.
+
+### Where it would help this architecture
+
+**System prompts** are the primary target — they're identical across every agent call and every iteration. In a multi-iteration run (LOW confidence → researcher reruns), the same system prompts are sent 2-4× per session. Caching them saves ~90% of those repeated input tokens.
+
+```
+iteration 1: researcher system prompt → full price (cache creation)
+             synthesizer system prompt → full price (cache creation)
+
+iteration 2: researcher system prompt → 10% cost (cache hit)
+             synthesizer system prompt → 10% cost (cache hit)
+```
+
+**Conversation history** inside the agent loop is another target. By turn 5 of the researcher loop (5 tool calls), the model is re-reading all previous tool results. Caching the stable prefix (system prompt + early turns) means later turns only pay for new tokens.
+
+### Why we haven't implemented it yet
+
+**Our prompts are below every provider's minimum threshold:**
+
+| Provider | Minimum | Researcher | Synthesizer |
+|----------|---------|------------|-------------|
+| Anthropic / OpenAI | 1,024 tokens | ~755 tokens | ~865 tokens |
+| Gemini | 32,768 tokens | ~755 tokens | ~865 tokens |
+
+**The Claude runner uses `query()` from the Agent SDK**, which abstracts away raw Anthropic API calls. The `cache_control` block-level parameter is not exposed — implementing it would require rewriting the Claude runner to use `Anthropic.messages.create()` directly with a custom tool loop.
+
+**The Gemini runners (Vercel, LangChain)** don't meet Gemini's 32k minimum. Would only qualify if we switched to a RAG-in-prompt pattern (passing retrieved chunks directly in the prompt), which contradicts our design decision to keep content in the RAG store.
+
+### When to revisit
+
+Prompt caching becomes worthwhile when:
+
+1. **Prompts grow beyond 1024 tokens** — adding few-shot examples, domain knowledge, or detailed tool schemas to the system prompt brings the Claude and Strands runners above the threshold with minimal architectural change
+2. **Same question asked by many users concurrently** — cache hit rate compounds across concurrent callers, not just across iterations of a single session
+3. **Domain-specific deployment** — a specialised deployment with a large, stable knowledge preamble baked into the system prompt is the ideal caching target
+4. **Claude direct API runner** — if the Claude runner is rewritten to use `Anthropic.messages.create()` directly (for more control), `cache_control` can be added to the system prompt immediately
+
+### Production best practices
+
+- **Put stable content first, dynamic content last** — the cache prefix must match exactly. System prompt → few-shot examples → retrieved context → user query (never cached)
+- **Track cache hit rate** — `cache_read_input_tokens / total_input_tokens` should be > 80% on repeated agent calls. Lower means prompts are varying too much between calls
+- **Warm the cache proactively** — on cold start, fire a cheap dummy request to prime the cache before real traffic hits the 5-minute (Anthropic) or 1-hour (OpenAI) window
+- **Cache the growing conversation history** — in multi-turn agents, mark the previous conversation as cacheable each turn so you only pay full price for the new turn
